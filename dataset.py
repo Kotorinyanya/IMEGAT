@@ -1,13 +1,22 @@
 import torch_geometric
+from nilearn.connectome import ConnectivityMeasure
+from scipy.sparse import coo_matrix
+import numpy as np
+import pandas as pd
 
 from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset
 import torch
 import os.path as osp
 from os.path import join
+
+from torch_geometric.utils import from_scipy_sparse_matrix
 from tqdm import tqdm
 import os
 import urllib.request as request
+
+from data_utils import read_fs_stats, extract_time_series, z_score_norm_data
+
 
 class ABIDE(InMemoryDataset):
     def __init__(self, root, name='ABIDE', transform=None, pre_transform=None, site='NYU',
@@ -20,12 +29,14 @@ class ABIDE(InMemoryDataset):
         self.derivative = derivative
         self.name = name + '_' + site
         self.site = site
+        self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
+                                         'ThickStd', 'MeanCurv', 'GausCurv']
         super(ABIDE, self).__init__(root, transform, pre_transform)
         self.data, self.slices = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):
-        return ['Outputs/']
+        return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv']
 
     @property
     def processed_file_names(self):
@@ -45,6 +56,9 @@ class ABIDE(InMemoryDataset):
 
         # Load the phenotype file from S3
         s3_pheno_file = request.urlopen(s3_pheno_path)
+        phenot_file = osp.join(out_dir, self.raw_file_names[1])
+        with open(phenot_file) as f:
+            f.write(s3_pheno_file.read())
         pheno_list = s3_pheno_file.readlines()
         print(pheno_list[0])
         # Get header indices
@@ -129,11 +143,45 @@ class ABIDE(InMemoryDataset):
         # Print all done
         print('Done!')
 
-
-
     def process(self):
-        pass
+        s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
+        pheno_df = pd.read_csv(s3_pheno_path)
+
+        correlation_measure = ConnectivityMeasure(kind='correlation')
+
+        anatomical_features_dict = read_fs_stats(self.root)
+        subject_ids = list(anatomical_features_dict.keys())
+
+        data_list = []
+        for subject in tqdm(subject_ids):
+            # phenotypic (for label only)
+            y = torch.from_numpy(
+                pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values)
+            # structural
+            lh_df, rh_df = anatomical_features_dict[subject]
+            node_features = torch.from_numpy(
+                np.concatenate([lh_df[self.anatomical_feature_names].values,
+                                rh_df[self.anatomical_feature_names].values]))
+            # functional
+            fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
+                                      "{}_func_preproc.nii.gz".format(subject)])
+
+            time_series = extract_time_series(fmri_nii_file)
+            time_series_list = self.pre_transform(time_series) if self.pre_transform else [time_series]
+            connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
+
+            for conn in connectivity_matrix_list:
+                edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(conn))
+                data = Data(x=node_features,
+                            edge_index=edge_index,
+                            edge_attr=edge_weight,
+                            y=y)
+                data_list.append(data)
+
+        self.data, self.slices = self.collate(data_list)
+        torch.save((self.data, self.slices), self.processed_paths[0])
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU')
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    pass
