@@ -1,9 +1,5 @@
-import os.path as osp
-import pandas as pd
-import os, fnmatch
-
-
 def find(pattern, path):
+    import os, fnmatch
     result = []
     for root, dirs, files in os.walk(path):
         for name in files:
@@ -13,6 +9,7 @@ def find(pattern, path):
 
 
 def read_fs_stats_file(stats_file):
+    import pandas as pd
     """
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
