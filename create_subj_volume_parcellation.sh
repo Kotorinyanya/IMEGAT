@@ -272,7 +272,7 @@ do
 	# Get anatomical stats table
 	if [[ ${get_anatomical_stats} == "YES" ]]
 		then
-#		mkdir -p ${output_dir}/${subject}/tables
+		mkdir -p ${output_dir}/${subject}/stats
 		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
 		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh
