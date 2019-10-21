@@ -15,7 +15,7 @@ from tqdm import tqdm
 import os
 import urllib.request as request
 
-from data_utils import read_fs_stats, extract_time_series, z_score_norm_data
+from data_utils import read_fs_stats, extract_time_series, z_score_norm_data, download_freesurfer_output
 
 
 class ABIDE(InMemoryDataset):
@@ -43,7 +43,6 @@ class ABIDE(InMemoryDataset):
         return 'data.pt'
 
     def download(self):
-
         # Init variables
         s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/' \
                     'ABIDE_Initiative'
@@ -54,11 +53,15 @@ class ABIDE(InMemoryDataset):
             print('Could not find {0}, creating now...'.format(out_dir))
             os.makedirs(out_dir)
 
+        download_freesurfer_output(site=self.site, out_dir=out_dir)
+
         # Load the phenotype file from S3
         s3_pheno_file = request.urlopen(s3_pheno_path)
         phenot_file = osp.join(out_dir, self.raw_file_names[1])
-        with open(phenot_file) as f:
+        with open(phenot_file, 'wb') as f:
             f.write(s3_pheno_file.read())
+
+        s3_pheno_file = request.urlopen(s3_pheno_path)
         pheno_list = s3_pheno_file.readlines()
         print(pheno_list[0])
         # Get header indices
@@ -113,14 +116,14 @@ class ABIDE(InMemoryDataset):
             print('Adding {0} to download queue...'.format(s3_path))
             s3_paths.append(s3_path)
 
-            # structural
-            filename = row_file_id
-            # for freesurfer Destrieux Atlas
-            sub_files = ['lh.aparc.a2009s.stats', 'rh.aparc.a2009s.stats']
-            for file in sub_files:
-                s3_path = '/'.join([s3_prefix, 'Outputs', 'freesurfer', '5.1', filename, 'stats', file])
-                print('Adding {0} to download queue...'.format(s3_path))
-                s3_paths.append(s3_path)
+            # # structural
+            # filename = row_file_id
+            # # for freesurfer Destrieux Atlas
+            # sub_files = ['lh.aparc.a2009s.stats', 'rh.aparc.a2009s.stats']
+            # for file in sub_files:
+            #     s3_path = '/'.join([s3_prefix, 'Outputs', 'freesurfer', '5.1', filename, 'stats', file])
+            #     print('Adding {0} to download queue...'.format(s3_path))
+            #     s3_paths.append(s3_path)
 
         # download the items
         total_num_files = len(s3_paths)
@@ -144,6 +147,7 @@ class ABIDE(InMemoryDataset):
         print('Done!')
 
     def process(self):
+
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
 
