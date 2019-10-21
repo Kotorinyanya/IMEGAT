@@ -158,12 +158,16 @@ paste ${output_dir}/temp_${first}_${last}_${rand_id}/${annotation_file}_number_t
 paste ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_number_table_${annotation_file}R ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R > ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_right_${annotation_file}
 cat ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_left_${annotation_file} ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_right_${annotation_file} > ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_${annotation_file}.txt
 
+
+
+
 # Take labels from fsaverage to subject space
 for subject in `cat ${subject_list}`
-	do printf "\n         >>>>         PREPROCESSING ${subject}         <<<< \n"
-
-	echo $(date) > ${output_dir}/temp_${first}_${last}_${rand_id}/start_date
-	echo "         >>>>         START TIME: `cat ${output_dir}/temp_${first}_${last}_${rand_id}/start_date`         <<<<"
+do
+    printf "\n         >>>>         PREPROCESSING ${subject}         <<<< \n"
+    printf "\n         >>>>         ${subject} ENDED AT: $(date)\n\n"
+#	echo $(date) > ${output_dir}/temp_${first}_${last}_${rand_id}/start_date
+#	echo "         >>>>         START TIME: `cat ${output_dir}/temp_${first}_${last}_${rand_id}/start_date`         <<<<"
 	mkdir -p ${output_dir}/${subject}
 	mkdir -p ${output_dir}/${subject}/label
 	sed '/_H_ROI/d' ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_${annotation_file}.txt > ${output_dir}/${subject}/LUT_${annotation_file}.txt
@@ -272,9 +276,9 @@ for subject in `cat ${subject_list}`
 	if [[ ${get_anatomical_stats} == "YES" ]]
 		then
 #		mkdir -p ${output_dir}/${subject}/tables
-		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -b ${subject} lh > ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt
+		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
-		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -b ${subject} rh > ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt
+		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
 #
 #		# Get tables with numerical values only
@@ -308,7 +312,8 @@ for subject in `cat ${subject_list}`
 
 	if [[ ${colorlut_miss} == "YES" ]]; then printf "\n         >>>>         ERROR: FreeSurferColorLUT.txt file not found. Individual subcortical masks NOT created\n"; fi
 
-	printf "\n         >>>>         ${subject} STARTED AT `cat ${output_dir}/temp_${first}_${last}_${rand_id}/start_date`, ENDED AT: $(date)\n\n"
+#	printf "\n         >>>>         ${subject} STARTED AT `cat ${output_dir}/temp_${first}_${last}_${rand_id}/start_date`, ENDED AT: $(date)\n\n"
+    printf "\n         >>>>         ${subject} ENDED AT: $(date)\n\n"
 
 done
 
