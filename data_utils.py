@@ -133,6 +133,12 @@ def download_freesurfer_output(site, out_dir):
         if site is not None and site.lower() != row_site.lower():
             continue
 
+        # functional
+        filename = row_file_id + '_' + 'func_preproc' + '.nii.gz'
+        s3_path = '/'.join([s3_prefix, 'Outputs', 'ccs', 'filt_noglobal', 'func_preproc', filename])
+        print('Adding {0} to download queue...'.format(s3_path))
+        s3_paths.append(s3_path)
+
         for fs_file in fs_file_list:
             s3_path = '/'.join([s3_prefix, 'Outputs', 'freesurfer/5.1', row_file_id, fs_file])
             print('Adding {0} to download queue...'.format(s3_path))
@@ -160,6 +166,34 @@ def download_freesurfer_output(site, out_dir):
     print('Done!')
 
 
+def chunks(l, n):
+    """Yield successive n chunks from l."""
+    size = int((len(l) + 1) / n) + 1
+    for i in range(0, len(l), size):
+        yield l[i:(i + size) if i + size < len(l) else len(l)]
+
+
+def process_fs_output(fs_subject_dir, sh_script_path):
+    import os.path as osp
+    import os
+    only_dirs = [f for f in os.listdir(fs_subject_dir) if osp.isdir(osp.join(fs_subject_dir, f))]
+    subject_ids = [osp.basename(p) for p in only_dirs]
+    num_workers = os.cpu_count()
+    subject_chunks = chunks(subject_ids, num_workers)
+
+    # save subject list chunks to file
+    all_file_names = []
+    for i, chunk in enumerate(subject_chunks):
+        file_basename = 'subject_list_{}'.format(i)
+        file_path = osp.join(fs_subject_dir, file_basename)
+        with open(file_path, 'w') as f:
+            for item in chunk:
+                f.write("%s\n" % item)
+        all_file_names.append(file_basename)
+    with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
+        for item in all_file_names:
+            f.write("%s\n" % item)
+
 def z_score_norm(tensor):
     """
     Normalize a tensor with mean and standard deviation.
@@ -183,4 +217,5 @@ def z_score_norm_data(data):
 
 if __name__ == '__main__':
     # read_fs_stats('datasets/NYU')
-    download_freesurfer_output('NYU', 'datasets/NYU')
+    # download_freesurfer_output('NYU', 'datasets/NYU')
+    process_fs_output('')
