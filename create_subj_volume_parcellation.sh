@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
 
-# Neurolab, CJ (2018): HCP-MMP1.0 volumetric (NIfTI) masks in native structural space. figshare. Dataset.
-# https://doi.org/10.6084/m9.figshare.4249400.v5
-
 # Creates subject-level parcellation image from annotation files in fsaverage space. Can be used with the HCP-MMP1.0 projected on fsaverage annotation files available from https://figshare.com/articles/HCP-MMP1_0_projected_on_fsaverage/3498446
 # usage:
 # bash create_subj_volume_parcellation -L <subject_list> -a <name_of_annot_file> -f <first_subject_row> -l <last_subject_row> -d <name_of_output_dir> -T <target_subject>
-# 
-# 
+#
+#
 # HOW TO USE
-# 
+#
 # Ingredients:
-# 
+#
 # Subject data. First of all, you need to have your subjects’ structural data preprocessed with FreeSurfer.
 # Shell script. Download the script: create_subj_volume_parcellation, unzip it (because wordpress won’t upload .sh files directly), and copy it to to your $SUBJECTS_DIR/ folder.
 # Fsaverage data. Copy the fsaverage folder from the FreeSurfer directory ($FREESURFER_HOME/subjects/fsaverage) to your $SUBJECTS_DIR/ folder.
 # Annotation files. Download rh.HCPMMP1.annot and lh.HCPMMP1.annot from https://figshare.com/articles/HCP-MMP1_0_projected_on_fsaverage/3498446. Copy them to your $SUBJECTS_DIR/ folder or to $SUBJECTS_DIR/fsaverage/label/.
 # Subject list. Create a list with the identifiers of the desired target subjects (named exactly as their corresponding names in $SUBJECTS_DIR/, of course).
-#  
+#
 # Instructions:
-# 
+#
 # Launch the script: bash create_subj_volume_parcellation.sh (this will show the compulsory and optional arguments).
 # The compulsory arguments are:
 # -L subject_list_name
@@ -69,7 +66,7 @@ while getopts ":L:f:l:a:d::m:t:s:T:" o; do
     esac
 done
 
-if [ -z "${L}" ] || [ -z "${a}" ] || [ -z "${d}" ]; then printf '\n Usage:\n	-To be run from the directory containing FreeSurfer subject folders, which should also contain the fsaverage folder. User must have writing permission. Original annotation files (eg, lh.HCPMMP1.annot, rh.HCPMMP1.annot) must be present in $SUBJECTS_DIR/fsaverage/label/, or in the base folder ($SUBJECTS_DIR/).\n	-Output: individual nifti volume, where regions are indicated by voxel values, is stored in each subject·s folder inside the output directory. Regions can then be identified through the region_index_table.txt stored in the output folder. Final annotation file in subject space is stored in original subject·s folder ($SUBJECTS_DIR/subject/label/), and will NOT ovewrite old files.\n\n Compulsory arguments:\n	-L <subject_list> (names must correspond to names of folders in $SUBJECTS_DIR)\n	-a <name_of_input_annot_file> (without specifying hemisphere and without extension. Usually, HCPMMP1)\n	-d <name_of_ouput_dir> \n\n Optional arguments:\n	-f: row in subject list indicating first subject to be processed\n	-l: row in subject list indicating last subject to be processed\n	-m <YES or NO> create individual nii.gz masks for cortical regions (requires FSL. Default is NO. Masks will be saved in /output_dir/subject/masks/)\n	-s <YES or NO> create individual nii.gz masks for 14 subcortical regions (from the FreeSurfer automatic segmentation. Requires the FreeSurferColorLUT.txt file in the base folder. Requires FSL. Defaults is NO)\n	-t <YES or NO> generate anatomical stats (mean area, volume, thickness, etc., per region. Saved in /output_dir/subject/tables/. Default is YES) table\n -T target subject space, FreeSurfer subject.\n\n	2018 CJNeurolab\n	University of Barcelona\n	by Hugo C Baggio & Alexandra Abos\n\n'; exit 1; fi
+if [ -z "${L}" ] || [ -z "${a}" ] || [ -z "${d}" ]; then printf '\n Usage:\n	-To be run from the directory containing FreeSurfer subject folders, which should also contain the fsaverage folder. User must have writing permission. Original annotation files (eg, lh.HCPMMP1.annot, rh.HCPMMP1.annot) must be present in $SUBJECTS_DIR/fsaverage/label/, or in the base folder ($SUBJECTS_DIR/).\n	-Output: individual nifti volume, where regions are indicated by voxel values, is stored in each subject·s folder inside the output directory. Regions can then be identified through the region_index_table.txt stored in the output folder. Final annotation file in subject space is stored in original subject·s folder ($SUBJECTS_DIR/subject/label/), and will NOT ovewrite old files.\n\n Compulsory arguments:\n	-L <subject_list> (names must correspond to names of folders in $SUBJECTS_DIR)\n	-a <name_of_input_annot_file> (without specifying hemisphere and without extension. Usually, HCPMMP1)\n	-d <name_of_ouput_dir> \n\n Optional arguments:\n	-f: row in subject list indicating first subject to be processed\n	-l: row in subject list indicating last subject to be processed\n	-m <YES or NO> create individual nii.gz masks for cortical regions (requires FSL. Default is NO. Masks will be saved in /output_dir/subject/masks/)\n	-s <YES or NO> create individual nii.gz masks for 14 subcortical regions (from the FreeSurfer automatic segmentation. Requires the FreeSurferColorLUT.txt file in the base folder. Requires FSL. Defaults is NO)\n	-t <YES or NO> generate anatomical stats (mean area, volume, thickness, etc., per region. Saved in /output_dir/subject/tables/. Default is YES) table\n	-T target subject space, FreeSurfer subject.\n\n	2018 CJNeurolab\n	University of Barcelona\n	by Hugo C Baggio & Alexandra Abos\n\n	Edited by Huze\n\n'; exit 1; fi
 
 create_individual_masks=NO
 annotation_file=$a
@@ -83,7 +80,7 @@ if [ ! -z "${l}" ] ; then last=$l; else last=`wc -l < ${subject_list_all}`; fi
 if [ ! -z "${m}" ] ; then create_individual_masks=$m; fi
 if [ ! -z "${s}" ] ; then create_aseg_files=$s; fi
 if [ ! -z "${t}" ] ; then get_anatomical_stats=$t; fi
- 
+
 printf "\n         >>>>         Current FreeSurfer subjects folder is $SUBJECTS_DIR\n\n"
 
 #Check if FreeSurferColorLUT.txt is present in base folder
@@ -104,7 +101,7 @@ rm -f ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_fi
 if [[ ! -e $SUBJECTS_DIR/fsaverage/label/lh.${annotation_file}.annot ]]
 	then cp $SUBJECTS_DIR/lh.${annotation_file}.annot $SUBJECTS_DIR/fsaverage/label/
 fi
-if [[ ! -e $SUBJECTS_DIR/fsaverage/label/rh.${annotation_file}.annot ]] 
+if [[ ! -e $SUBJECTS_DIR/fsaverage/label/rh.${annotation_file}.annot ]]
 	then cp $SUBJECTS_DIR/rh.${annotation_file}.annot $SUBJECTS_DIR/fsaverage/label/
 fi
 
@@ -140,7 +137,7 @@ for labelsR in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_$
 done
 
 # Create new numbers column
-number_labels_R=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R` 
+number_labels_R=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
 number_labels_L=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}L`
 
 for ((i=1;i<=${number_labels_L};i+=1))
@@ -180,7 +177,7 @@ for subject in `cat ${subject_list}`
 		rm -f ${output_dir}/${subject}/log_label2label
 
 		if [ ! -z "${T}" ] ; then trgsubject=${T}; else trgsubject=${subject}; fi
-		
+
 		# Convert labels to target space
 		for label in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
 			do echo "transforming ${label}"
@@ -202,9 +199,9 @@ for subject in `cat ${subject_list}`
 				then printf " --l ${output_dir}/${subject}/label/${labelsL}" >> ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L
 			fi
 		done
-	
-		mris_label2annot --s ${subject} --h rh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_R` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_R >> ${output_dir}/${subject}/label2annot_${annotation_file}rh.log 
-		mris_label2annot --s ${subject} --h lh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_L >> ${output_dir}/${subject}/label2annot_${annotation_file}lh.log 
+
+		mris_label2annot --s ${subject} --h rh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_R` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_R >> ${output_dir}/${subject}/label2annot_${annotation_file}rh.log
+		mris_label2annot --s ${subject} --h lh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_L >> ${output_dir}/${subject}/label2annot_${annotation_file}lh.log
 
 	fi
 
@@ -226,7 +223,7 @@ for subject in `cat ${subject_list}`
 
 	# Create individual mask files
 	if [[ ${create_individual_masks} == "YES" ]]
-		then 
+		then
 		printf ">> Creating individual region masks for subject ${subject}\n"
 		mkdir -p ${output_dir}/${subject}/masks
 		for ((i=1;i<=${number_labels_L};i+=1))
@@ -263,7 +260,7 @@ for subject in `cat ${subject_list}`
 		for side in Left Right
 			do printf "$side-Thalamus-Proper\n$side-Caudate\n$side-Pallidum\n$side-Hippocampus\n$side-Amygdala\n$side-Accumbens-area\n" >> ${output_dir}/${subject}/aseg_masks/list_aseg
 		done
-		
+
 		for rois in `cat ${output_dir}/${subject}/aseg_masks/list_aseg`
 			do roi_index=`grep "${rois} " FreeSurferColorLUT.txt | cut -c-2` # the space after ${rois} is not casual
 			fslmaths ${output_dir}/${subject}/${annotation_file}.nii.gz -thr ${roi_index} -uthr ${roi_index} -bin ${output_dir}/${subject}/aseg_masks/${rois}
@@ -279,7 +276,7 @@ for subject in `cat ${subject_list}`
 		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
 		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -b ${subject} rh > ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt
 		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
-		
+
 		# Get tables with numerical values only
 		grep -n 'structure' ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name
 		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name2
@@ -295,16 +292,16 @@ for subject in `cat ${subject_list}`
 		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2
 		line_number_vert=`cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2`
 		pre_number_vert=`echo "${line_number_vert}-1" | bc`
-		
+
 		number_lines=`wc -l < ${output_dir}/${subject}/tables/table_rh.txt`
 		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_rh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt
-		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt 
-		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt        
+		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
+		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
 		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/rh_mri_anatomical_stats_variables
 
 		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt
-		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt 
-		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt        
+		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
+		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
 		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/lh_mri_anatomical_stats_variables
 
 	fi
