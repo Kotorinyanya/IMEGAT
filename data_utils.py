@@ -217,5 +217,5 @@ def z_score_norm_data(data):
 
 if __name__ == '__main__':
     # read_fs_stats('datasets/NYU')
-    # download_freesurfer_output('NYU', 'datasets/NYU')
-    process_fs_output('')
+    download_freesurfer_output('NYU', 'datasets/NYU')
+    # process_fs_output('')
