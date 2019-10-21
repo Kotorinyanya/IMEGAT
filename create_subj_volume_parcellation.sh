@@ -2,21 +2,21 @@
 
 # Creates subject-level parcellation image from annotation files in fsaverage space. Can be used with the HCP-MMP1.0 projected on fsaverage annotation files available from https://figshare.com/articles/HCP-MMP1_0_projected_on_fsaverage/3498446
 # usage:
-# bash create_subj_volume_parcellation -L <subject_list> -a <name_of_annot_file> -f <first_subject_row> -l <last_subject_row> -d <name_of_output_dir> -T <target_subject>
-#
-#
+# bash create_subj_volume_parcellation -L <subject_list> -a <name_of_annot_file> -f <first_subject_row> -l <last_subject_row> -d <name_of_output_dir>
+# 
+# 
 # HOW TO USE
-#
+# 
 # Ingredients:
-#
+# 
 # Subject data. First of all, you need to have your subjects’ structural data preprocessed with FreeSurfer.
 # Shell script. Download the script: create_subj_volume_parcellation, unzip it (because wordpress won’t upload .sh files directly), and copy it to to your $SUBJECTS_DIR/ folder.
 # Fsaverage data. Copy the fsaverage folder from the FreeSurfer directory ($FREESURFER_HOME/subjects/fsaverage) to your $SUBJECTS_DIR/ folder.
 # Annotation files. Download rh.HCPMMP1.annot and lh.HCPMMP1.annot from https://figshare.com/articles/HCP-MMP1_0_projected_on_fsaverage/3498446. Copy them to your $SUBJECTS_DIR/ folder or to $SUBJECTS_DIR/fsaverage/label/.
 # Subject list. Create a list with the identifiers of the desired target subjects (named exactly as their corresponding names in $SUBJECTS_DIR/, of course).
-#
+#  
 # Instructions:
-#
+# 
 # Launch the script: bash create_subj_volume_parcellation.sh (this will show the compulsory and optional arguments).
 # The compulsory arguments are:
 # -L subject_list_name
@@ -34,10 +34,13 @@
 # Inside the original subjects’ label folders, post-transformation annotation files will be created. These are not overwritten if the script is relaunched; so, if you ran into a problem and want to start over, you should delete these files (named lh(rh).<subject>_<name_of_annotation_file>.annot)
 
 # define compulsory and optional arguments
-while getopts ":L:f:l:a:d::m:t:s:T:" o; do
+while getopts ":L:T:f:l:a:d::m:t:s:" o; do
     case "${o}" in
         L)
             L=${OPTARG}
+            ;;
+        T)
+            T=${OPTARG}
             ;;
         f)
             f=${OPTARG}
@@ -60,9 +63,6 @@ while getopts ":L:f:l:a:d::m:t:s:T:" o; do
 	s)
 	    s=${OPTARG}
 	    ;;
-	T)
-		T=${OPTARG}
-		;;
     esac
 done
 
@@ -80,7 +80,7 @@ if [ ! -z "${l}" ] ; then last=$l; else last=`wc -l < ${subject_list_all}`; fi
 if [ ! -z "${m}" ] ; then create_individual_masks=$m; fi
 if [ ! -z "${s}" ] ; then create_aseg_files=$s; fi
 if [ ! -z "${t}" ] ; then get_anatomical_stats=$t; fi
-
+ 
 printf "\n         >>>>         Current FreeSurfer subjects folder is $SUBJECTS_DIR\n\n"
 
 #Check if FreeSurferColorLUT.txt is present in base folder
@@ -101,7 +101,7 @@ rm -f ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_fi
 if [[ ! -e $SUBJECTS_DIR/fsaverage/label/lh.${annotation_file}.annot ]]
 	then cp $SUBJECTS_DIR/lh.${annotation_file}.annot $SUBJECTS_DIR/fsaverage/label/
 fi
-if [[ ! -e $SUBJECTS_DIR/fsaverage/label/rh.${annotation_file}.annot ]]
+if [[ ! -e $SUBJECTS_DIR/fsaverage/label/rh.${annotation_file}.annot ]] 
 	then cp $SUBJECTS_DIR/rh.${annotation_file}.annot $SUBJECTS_DIR/fsaverage/label/
 fi
 
@@ -137,7 +137,7 @@ for labelsR in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_$
 done
 
 # Create new numbers column
-number_labels_R=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
+number_labels_R=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R` 
 number_labels_L=`wc -l < ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}L`
 
 for ((i=1;i<=${number_labels_L};i+=1))
@@ -176,7 +176,7 @@ for subject in `cat ${subject_list}`
 		rm -f ${output_dir}/${subject}/label2annot_${annotation_file}?h.log
 		rm -f ${output_dir}/${subject}/log_label2label
 
-		if [ ! -z "${T}" ] ; then trgsubject=${T}; else trgsubject=${subject}; fi
+        if [ ! -z "${T}" ] ; then trgsubject=${T}; else trgsubject=${subject}; fi
 
 		# Convert labels to target space
 		for label in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
@@ -188,7 +188,7 @@ for subject in `cat ${subject_list}`
 			mri_label2label --srcsubject fsaverage --srclabel ${output_dir}/label/${label} --trgsubject ${trgsubject} --trglabel ${output_dir}/${subject}/label/${label}.label --regmethod surface --hemi lh >> ${output_dir}/${subject}/log_label2label
 		done
 
-		# Convert labels to annot
+		# Convert labels to annot (in subject space)
 		rm -f ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_R
 		rm -f ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L
 		for labelsR in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
@@ -199,9 +199,9 @@ for subject in `cat ${subject_list}`
 				then printf " --l ${output_dir}/${subject}/label/${labelsL}" >> ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L
 			fi
 		done
-
-		mris_label2annot --s ${subject} --h rh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_R` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_R >> ${output_dir}/${subject}/label2annot_${annotation_file}rh.log
-		mris_label2annot --s ${subject} --h lh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_L >> ${output_dir}/${subject}/label2annot_${annotation_file}lh.log
+	
+		mris_label2annot --s ${subject} --h rh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_R` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_R >> ${output_dir}/${subject}/label2annot_${annotation_file}rh.log 
+		mris_label2annot --s ${subject} --h lh `cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_cat_${annotation_file}_L` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${first}_${last}_${rand_id}/colortab_${annotation_file}_L >> ${output_dir}/${subject}/label2annot_${annotation_file}lh.log 
 
 	fi
 
@@ -223,7 +223,7 @@ for subject in `cat ${subject_list}`
 
 	# Create individual mask files
 	if [[ ${create_individual_masks} == "YES" ]]
-		then
+		then 
 		printf ">> Creating individual region masks for subject ${subject}\n"
 		mkdir -p ${output_dir}/${subject}/masks
 		for ((i=1;i<=${number_labels_L};i+=1))
@@ -260,7 +260,7 @@ for subject in `cat ${subject_list}`
 		for side in Left Right
 			do printf "$side-Thalamus-Proper\n$side-Caudate\n$side-Pallidum\n$side-Hippocampus\n$side-Amygdala\n$side-Accumbens-area\n" >> ${output_dir}/${subject}/aseg_masks/list_aseg
 		done
-
+		
 		for rois in `cat ${output_dir}/${subject}/aseg_masks/list_aseg`
 			do roi_index=`grep "${rois} " FreeSurferColorLUT.txt | cut -c-2` # the space after ${rois} is not casual
 			fslmaths ${output_dir}/${subject}/${annotation_file}.nii.gz -thr ${roi_index} -uthr ${roi_index} -bin ${output_dir}/${subject}/aseg_masks/${rois}
@@ -271,38 +271,38 @@ for subject in `cat ${subject_list}`
 	# Get anatomical stats table
 	if [[ ${get_anatomical_stats} == "YES" ]]
 		then
-		mkdir -p ${output_dir}/${subject}/tables
+#		mkdir -p ${output_dir}/${subject}/tables
 		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -b ${subject} lh > ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt
-		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
+#		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
 		mris_anatomical_stats -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -b ${subject} rh > ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt
-		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
-
-		# Get tables with numerical values only
-		grep -n 'structure' ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name
-		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name2
-		line_structure_name=`cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name2`
-		post_end_line=`echo "1+${line_structure_name}" | bc`
-		sed "1,${post_end_line}d" ${output_dir}/${subject}/tables/table_rh.txt > ${output_dir}/${subject}/tables/table_rh_values
-		sed "1,${post_end_line}d" ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/${subject}/tables/table_lh_values
-		sed -i -r 's/\S+//10' ${output_dir}/${subject}/tables/table_lh_values
-		sed -i -r 's/\S+//10' ${output_dir}/${subject}/tables/table_rh_values
+#		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
+#
+#		# Get tables with numerical values only
+#		grep -n 'structure' ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name
+#		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name2
+#		line_structure_name=`cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_line_structure_name2`
+#		post_end_line=`echo "1+${line_structure_name}" | bc`
+#		sed "1,${post_end_line}d" ${output_dir}/${subject}/tables/table_rh.txt > ${output_dir}/${subject}/tables/table_rh_values
+#		sed "1,${post_end_line}d" ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/${subject}/tables/table_lh_values
+#		sed -i -r 's/\S+//10' ${output_dir}/${subject}/tables/table_lh_values
+#		sed -i -r 's/\S+//10' ${output_dir}/${subject}/tables/table_rh_values
 
 		# Get variable names
-		grep -n 'number of vertices' ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert
-		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2
-		line_number_vert=`cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2`
-		pre_number_vert=`echo "${line_number_vert}-1" | bc`
-
-		number_lines=`wc -l < ${output_dir}/${subject}/tables/table_rh.txt`
-		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_rh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt
-		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
-		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
-		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/rh_mri_anatomical_stats_variables
-
-		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt
-		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
-		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
-		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/lh_mri_anatomical_stats_variables
+#		grep -n 'number of vertices' ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert
+#		grep -Eo '[0-9]{1,4}' ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert > ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2
+#		line_number_vert=`cat ${output_dir}/temp_${first}_${last}_${rand_id}/temp_number_vert2`
+#		pre_number_vert=`echo "${line_number_vert}-1" | bc`
+#
+#		number_lines=`wc -l < ${output_dir}/${subject}/tables/table_rh.txt`
+#		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_rh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt
+#		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
+#		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt
+#		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/rh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/rh_mri_anatomical_stats_variables
+#
+#		sed "1,${pre_number_vert}d;${post_end_line},${number_lines}d" ${output_dir}/${subject}/tables/table_lh.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt
+#		cut -c5- ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables.txt > ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
+#		sed -i 's/ /_/g' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt
+#		awk '{ for (f = 1; f <= NF; f++)   a[NR, f] = $f  }  NF > nf { nf = NF } END {   for (f = 1; f <= nf; f++) for (r = 1; r <= NR; r++)     printf a[r, f] (r==NR ? RS : FS)  }' ${output_dir}/temp_${first}_${last}_${rand_id}/lh_mri_anatomical_stats_variables2.txt > ${output_dir}/${subject}/tables/lh_mri_anatomical_stats_variables
 
 	fi
 
