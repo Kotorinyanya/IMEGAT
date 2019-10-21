@@ -158,9 +158,6 @@ paste ${output_dir}/temp_${first}_${last}_${rand_id}/${annotation_file}_number_t
 paste ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_number_table_${annotation_file}R ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R > ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_right_${annotation_file}
 cat ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_left_${annotation_file} ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_right_${annotation_file} > ${output_dir}/temp_${first}_${last}_${rand_id}/LUT_${annotation_file}.txt
 
-
-
-
 # Take labels from fsaverage to subject space
 for subject in `cat ${subject_list}`
 do
