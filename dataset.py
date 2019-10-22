@@ -15,7 +15,8 @@ from tqdm import tqdm
 import os
 import urllib.request as request
 
-from data_utils import read_fs_stats, extract_time_series, z_score_norm_data, download_freesurfer_output
+from data_utils import read_fs_stats, extract_time_series, z_score_norm_data, download_freesurfer_output, \
+    process_fs_output
 
 
 class ABIDE(InMemoryDataset):
@@ -36,7 +37,7 @@ class ABIDE(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv']
+        return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv', 'lh.HCPMMP1.annot', 'rh.HCPMMP1.annot']
 
     @property
     def processed_file_names(self):
@@ -53,14 +54,23 @@ class ABIDE(InMemoryDataset):
             print('Could not find {0}, creating now...'.format(out_dir))
             os.makedirs(out_dir)
 
+        # download entire freesurfer ouput
         download_freesurfer_output(site=self.site, out_dir=out_dir)
+
+        # download .annot
+        lh_url = 'https://ndownloader.figshare.com/files/5528816'
+        rh_url = 'https://ndownloader.figshare.com/files/5528819'
+        os.system('wget {} -p {}'.format(lh_url, out_dir))
+        os.system('wget {} -p {}'.format(rh_url, out_dir))
 
         # Load the phenotype file from S3
         s3_pheno_file = request.urlopen(s3_pheno_path)
         phenot_file = osp.join(out_dir, self.raw_file_names[1])
+        # download csv
         with open(phenot_file, 'wb') as f:
             f.write(s3_pheno_file.read())
 
+        # download images
         s3_pheno_file = request.urlopen(s3_pheno_path)
         pheno_list = s3_pheno_file.readlines()
         print(pheno_list[0])
@@ -147,6 +157,16 @@ class ABIDE(InMemoryDataset):
         print('Done!')
 
     def process(self):
+        raw_dir = '/'.join([self.root, 'raw'])
+
+        # copy .annot to SUBJECT_DIR
+        fs_subject_dir = osp.join(raw_dir, self.raw_file_names[0], 'Outputs/freesurfer/5.1')
+        os.system('cp {} {}'.format(osp.join(raw_dir, self.raw_file_names[2]), fs_subject_dir))
+        os.system('cp {} {}'.format(osp.join(raw_dir, self.raw_file_names[3]), fs_subject_dir))
+
+        # process fs outputs
+        shell_script_path = osp.join(os.getcwd(), 'create_subj_volume_parcellation.sh')
+        process_fs_output(fs_subject_dir, shell_script_path)
 
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)

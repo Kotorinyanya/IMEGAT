@@ -194,6 +194,11 @@ def process_fs_output(fs_subject_dir, sh_script_path):
         for item in all_file_names:
             f.write("%s\n" % item)
 
+    # run the script in parallel
+    os.system('cd {} &&'.format(fs_subject_dir) +
+              'cat all_subject_list | parallel bash ' + sh_script_path + '-L {} -a HCPMMP1 -d {} -t YES')
+
+
 def z_score_norm(tensor):
     """
     Normalize a tensor with mean and standard deviation.
