@@ -194,9 +194,22 @@ def process_fs_output(fs_subject_dir, sh_script_path):
         for item in all_file_names:
             f.write("%s\n" % item)
 
-    # run the script in parallel
-    os.system('cd {} &&'.format(fs_subject_dir) +
-              'cat all_subject_list | parallel bash ' + sh_script_path + '-L {} -a HCPMMP1 -d {} -t YES')
+    cp_cmd = 'cd {} && cp -r $SUBJECTS_DIR/fsaverage ./'.format(fs_subject_dir)
+    # os.system(cp_cmd)
+    # os.environ["SUBJECT_DIR"] = fs_subject_dir
+    # # run the script in parallel
+    cmd = 'cd {} &&'.format(fs_subject_dir) + \
+          'cat all_subject_list | parallel bash ' + sh_script_path + \
+          ' -L {} -a HCPMMP1 -d {}_output -t YES "&>" {}.log'
+    # os.system(cmd)
+    merge_cmd = 'cd {};'.format(fs_subject_dir) + \
+                'mkdir all_output;' + \
+                'find -name "subject_list_*_output" -type d -print0 | xargs -0 -n 1 -I {} mv "{}" "all_output/{}"'
+
+    if osp.isdir(osp.join(fs_subject_dir, 'all_output')):
+        return
+    else:
+        raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd)
 
 
 def z_score_norm(tensor):

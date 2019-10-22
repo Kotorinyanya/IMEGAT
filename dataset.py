@@ -37,7 +37,8 @@ class ABIDE(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv', 'lh.HCPMMP1.annot', 'rh.HCPMMP1.annot']
+        return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv', 'lh.HCPMMP1.annot', 'rh.HCPMMP1.annot',
+                'HCPMMP1.nii.gz']
 
     @property
     def processed_file_names(self):
@@ -62,6 +63,10 @@ class ABIDE(InMemoryDataset):
         rh_url = 'https://ndownloader.figshare.com/files/5528819'
         os.system('wget {} -p {}'.format(lh_url, out_dir))
         os.system('wget {} -p {}'.format(rh_url, out_dir))
+
+        # download HCPMMP1.nii.gz
+        url = ''
+        os.system('wget {} -p {}'.format(url, out_dir))
 
         # Load the phenotype file from S3
         s3_pheno_file = request.urlopen(s3_pheno_path)
@@ -160,7 +165,7 @@ class ABIDE(InMemoryDataset):
         raw_dir = '/'.join([self.root, 'raw'])
 
         # copy .annot to SUBJECT_DIR
-        fs_subject_dir = osp.join(raw_dir, self.raw_file_names[0], 'Outputs/freesurfer/5.1')
+        fs_subject_dir = osp.join(raw_dir, self.raw_file_names[0], 'freesurfer/5.1')
         os.system('cp {} {}'.format(osp.join(raw_dir, self.raw_file_names[2]), fs_subject_dir))
         os.system('cp {} {}'.format(osp.join(raw_dir, self.raw_file_names[3]), fs_subject_dir))
 
