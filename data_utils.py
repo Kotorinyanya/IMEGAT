@@ -14,7 +14,7 @@ def read_fs_stats_file(stats_file):
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
     """
-    skip_rows = list(range(0, 53))
+    skip_rows = list(range(0, 59)) # 53 for legacy
     names = ['StructName',
              'NumVert',
              'SurfArea',
@@ -45,11 +45,11 @@ def read_fs_stats(root):
     return res_dict
 
 
-def extract_time_series(nii_file):
+def extract_time_series(nii_file, atlas_nii_file=None):
     from nilearn.input_data import NiftiLabelsMasker
     from nilearn.datasets import fetch_atlas_destrieux_2009
-    destrieux_2009 = fetch_atlas_destrieux_2009()
-    masker = NiftiLabelsMasker(labels_img=destrieux_2009.maps, standardize=True,
+    atlas_nii_file = fetch_atlas_destrieux_2009().maps if atlas_nii_file is None else atlas_nii_file
+    masker = NiftiLabelsMasker(labels_img=atlas_nii_file, standardize=True,
                                memory='nilearn_cache', verbose=5)
     time_series = masker.fit_transform(nii_file)
     return time_series
@@ -204,12 +204,14 @@ def process_fs_output(fs_subject_dir, sh_script_path):
     # os.system(cmd)
     merge_cmd = 'cd {};'.format(fs_subject_dir) + \
                 'mkdir all_output;' + \
-                'find -name "subject_list_*_output" -type d -print0 | xargs -0 -n 1 -I {} mv "{}" "all_output/{}"'
+                'find -name "subject_list_*_output" -type d -print0 | xargs -0 -n 1 -I {} mv "{}" "all_output/{}";' + \
+                "find -name 'NYU*' -type d -exec sh -c 'mv {} ./$(basename {})' \;" + \
+                "find -name 'subject_list_*' -type d -exec sh -c 'rm -rf {}' \;"
 
     if osp.isdir(osp.join(fs_subject_dir, 'all_output')):
         return
     else:
-        raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd)
+        raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd + '\n' + merge_cmd)
 
 
 def z_score_norm(tensor):

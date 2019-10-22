@@ -38,7 +38,7 @@ class ABIDE(InMemoryDataset):
     @property
     def raw_file_names(self):
         return ['Outputs/', 'Phenotypic_V1_0b_preprocessed1.csv', 'lh.HCPMMP1.annot', 'rh.HCPMMP1.annot',
-                'HCPMMP1.nii.gz']
+                'HCPMMP1_on_MNI152_ICBM2009a_nlin.nii.gz']
 
     @property
     def processed_file_names(self):
@@ -65,7 +65,7 @@ class ABIDE(InMemoryDataset):
         os.system('wget {} -p {}'.format(rh_url, out_dir))
 
         # download HCPMMP1.nii.gz
-        url = ''
+        url = 'https://s3-eu-west-1.amazonaws.com/pfigshare-u-files/5594363/HCPMMP1_on_MNI152_ICBM2009a_nlin.nii.gz'
         os.system('wget {} -p {}'.format(url, out_dir))
 
         # Load the phenotype file from S3
@@ -173,12 +173,15 @@ class ABIDE(InMemoryDataset):
         shell_script_path = osp.join(os.getcwd(), 'create_subj_volume_parcellation.sh')
         process_fs_output(fs_subject_dir, shell_script_path)
 
+        fs_subject_dir = osp.join(fs_subject_dir, 'all_output')
+
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
 
         correlation_measure = ConnectivityMeasure(kind='correlation')
+        atlas_nii_file = '/'.join([self.root, 'raw', self.raw_file_names[4]])
 
-        anatomical_features_dict = read_fs_stats(self.root)
+        anatomical_features_dict = read_fs_stats(fs_subject_dir)
         subject_ids = list(anatomical_features_dict.keys())
 
         data_list = []
@@ -195,7 +198,7 @@ class ABIDE(InMemoryDataset):
             fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
                                       "{}_func_preproc.nii.gz".format(subject)])
 
-            time_series = extract_time_series(fmri_nii_file)
+            time_series = extract_time_series(fmri_nii_file, atlas_nii_file)
             time_series_list = self.pre_transform(time_series) if self.pre_transform else [time_series]
             connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
