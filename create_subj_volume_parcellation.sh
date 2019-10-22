@@ -87,8 +87,9 @@ printf "\n         >>>>         Current FreeSurfer subjects folder is $SUBJECTS_
 if [[ ${create_aseg_files} == "YES" ]]; then if [[ ! -e FreeSurferColorLUT.txt ]]; then printf "         >>>>         ERROR: FreeSurferColorLUT.txt file not found. Subcortical masks will NOT be created\n\n"; create_aseg_files=NO; colorlut_miss=YES; fi; fi
 
 # Create subject list with subjects defined in the input
-sed -n "${first},${last} p" ${subject_list_all} > temp_subject_list_${first}_${last}
-subject_list=temp_subject_list_${first}_${last}
+#sed -n "${first},${last} p" ${subject_list_all} > temp_subject_list_${first}_${last}
+#subject_list=temp_subject_list_${first}_${last}
+subject_list=${subject_list_all}
 
 mkdir -p ${output_dir}
 mkdir -p ${output_dir}/label
@@ -316,4 +317,4 @@ done
 
 rm -r ${output_dir}/temp_${first}_${last}_${rand_id}
 
-rm ${subject_list}
+#rm ${subject_list}
