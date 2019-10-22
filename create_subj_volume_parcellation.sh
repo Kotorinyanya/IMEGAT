@@ -177,7 +177,7 @@ do
 		rm -f ${output_dir}/${subject}/label2annot_${annotation_file}?h.log
 		rm -f ${output_dir}/${subject}/log_label2label
 
-        if [ ! -z "${T}" ] ; then trgsubject=${T}; else trgsubject=${subject}; fi
+        if [[ ! -z "${T}" ]] ; then trgsubject=${T}; else trgsubject=${subject}; fi
 
 		# Convert labels to target space
 		for label in `cat ${output_dir}/temp_${first}_${last}_${rand_id}/list_labels_${annotation_file}R`
