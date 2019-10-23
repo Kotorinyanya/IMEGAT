@@ -274,9 +274,9 @@ do
 	if [[ ${get_anatomical_stats} == "YES" ]]
 		then
 		mkdir -p ${output_dir}/${subject}/stats
-		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/lh.cortex.label -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f $SUBJECTS_DIR/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh white
+		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/lh.cortex.label -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh white
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
-		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/rh.cortex.label -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f $SUBJECTS_DIR/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh white
+		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/rh.cortex.label -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh white
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
 #
 #		# Get tables with numerical values only

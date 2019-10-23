@@ -14,7 +14,7 @@ def read_fs_stats_file(stats_file):
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
     """
-    skip_rows = list(range(0, 59)) # 53 for legacy
+    skip_rows = list(range(0, 59))  # 53 for legacy
     names = ['StructName',
              'NumVert',
              'SurfArea',
