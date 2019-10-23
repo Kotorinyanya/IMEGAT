@@ -26,6 +26,7 @@ def read_fs_stats_file(stats_file):
              'FoldInd',
              'CurvInd']
     df = pd.read_csv(stats_file, sep=' +', skiprows=skip_rows, names=names)
+    df = df[1:]  # remove subcrotical (not for legacy)
     return df
 
 
@@ -55,7 +56,7 @@ def extract_time_series(nii_file, atlas_nii_file=None):
     return time_series
 
 
-def resample_temporal(time_series, time_window):
+def resample_temporal(time_series, time_window=30):
     time_series_list = []
     length = time_series.shape[0]
     for start in range(0, length, time_window):
@@ -232,6 +233,11 @@ def z_score_norm(tensor):
 
 def z_score_norm_data(data):
     data.x = z_score_norm(data.x)
+    return data
+
+
+def gaussian_fit(data):
+    data.x = data.x.normal_(mean=0, std=1)
     return data
 
 

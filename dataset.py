@@ -1,5 +1,6 @@
 import torch_geometric
 from nilearn.connectome import ConnectivityMeasure
+from nilearn.input_data import NiftiLabelsMasker
 from scipy.sparse import coo_matrix
 import numpy as np
 import pandas as pd
@@ -10,13 +11,15 @@ import torch
 import os.path as osp
 from os.path import join
 
+from nilearn import image
+
 from torch_geometric.utils import from_scipy_sparse_matrix
 from tqdm import tqdm
 import os
 import urllib.request as request
 
 from data_utils import read_fs_stats, extract_time_series, z_score_norm_data, download_freesurfer_output, \
-    process_fs_output
+    process_fs_output, resample_temporal
 
 
 class ABIDE(InMemoryDataset):
@@ -179,7 +182,12 @@ class ABIDE(InMemoryDataset):
         pheno_df = pd.read_csv(s3_pheno_path)
 
         correlation_measure = ConnectivityMeasure(kind='correlation')
+
+        # load and transform atlas
         atlas_nii_file = '/'.join([self.root, 'raw', self.raw_file_names[4]])
+        atlas_img = image.load_img(atlas_nii_file)
+        atlas_img.get_data()[atlas_img.get_data()[:int(atlas_img.shape[0] / 2 + 1), :, :].nonzero()] += \
+            atlas_img.get_data().max()
 
         anatomical_features_dict = read_fs_stats(fs_subject_dir)
         subject_ids = list(anatomical_features_dict.keys())
@@ -198,7 +206,11 @@ class ABIDE(InMemoryDataset):
             fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
                                       "{}_func_preproc.nii.gz".format(subject)])
 
-            time_series = extract_time_series(fmri_nii_file, atlas_nii_file)
+            masker = NiftiLabelsMasker(labels_img=atlas_img, standardize=True,
+                                       memory='nilearn_cache', verbose=5)
+            time_series = masker.fit_transform(fmri_nii_file)
+
+            # time_series = extract_time_series(fmri_nii_file, atlas_nii_file)
             time_series_list = self.pre_transform(time_series) if self.pre_transform else [time_series]
             connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
@@ -215,5 +227,5 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, pre_transform=resample_temporal)
     pass
