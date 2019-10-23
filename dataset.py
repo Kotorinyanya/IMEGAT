@@ -18,14 +18,24 @@ from tqdm import tqdm
 import os
 import urllib.request as request
 
-from data_utils import read_fs_stats, extract_time_series, z_score_norm_data, download_freesurfer_output, \
+from utils import z_score_norm_data, positive_transform
+
+from data_utils import read_fs_stats, extract_time_series, download_freesurfer_output, \
     process_fs_output, resample_temporal
 
 
 class ABIDE(InMemoryDataset):
-    def __init__(self, root, name='ABIDE', transform=None, pre_transform=None, site='NYU',
-                 derivative='func_preproc', pipeline='ccs', strategy='filt_noglobal', extension='.nii.gz',
+    def __init__(self, root,
+                 name='ABIDE',
+                 transform=None,
+                 resample_ts=False,
+                 normalize_edge=False,
+                 site='NYU',
+                 derivative='func_preproc', pipeline='ccs', strategy='filt_noglobal',
+                 extension='.nii.gz',
                  mean_fd_thresh=0.2):
+        self.normalize_edge = normalize_edge
+        self.resample_ts = resample_ts
         self.mean_fd_thresh = mean_fd_thresh
         self.extension = extension
         self.strategy = strategy
@@ -35,7 +45,7 @@ class ABIDE(InMemoryDataset):
         self.site = site
         self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
                                          'ThickStd', 'MeanCurv', 'GausCurv']
-        super(ABIDE, self).__init__(root, transform, pre_transform)
+        super(ABIDE, self).__init__(root, transform)
         self.data, self.slices = torch.load(self.processed_paths[0])
 
     @property
@@ -211,10 +221,11 @@ class ABIDE(InMemoryDataset):
             time_series = masker.fit_transform(fmri_nii_file)
 
             # time_series = extract_time_series(fmri_nii_file, atlas_nii_file)
-            time_series_list = self.pre_transform(time_series) if self.pre_transform else [time_series]
+            time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
             connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
             for conn in connectivity_matrix_list:
+                conn = positive_transform(conn) if self.normalize_edge else conn
                 edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(conn))
                 data = Data(x=node_features,
                             edge_index=edge_index,
@@ -227,5 +238,5 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, pre_transform=resample_temporal)
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
     pass

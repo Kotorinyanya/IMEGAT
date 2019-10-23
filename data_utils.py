@@ -1,3 +1,5 @@
+
+
 def find(pattern, path):
     import os, fnmatch
     result = []
@@ -213,32 +215,6 @@ def process_fs_output(fs_subject_dir, sh_script_path):
         return
     else:
         raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd + '\n' + merge_cmd)
-
-
-def z_score_norm(tensor):
-    """
-    Normalize a tensor with mean and standard deviation.
-    Args:
-        tensor (Tensor): Tensor image of size [num_nodes, num_node_features] to be normalized.
-
-    Returns:
-        Tensor: Normalized tensor.
-    """
-    mean = tensor.mean(dim=0)
-    std = tensor.std(dim=0)
-    std[std == 0] = 1e-6
-    normed_tensor = (tensor - mean) / std
-    return normed_tensor
-
-
-def z_score_norm_data(data):
-    data.x = z_score_norm(data.x)
-    return data
-
-
-def gaussian_fit(data):
-    data.x = data.x.normal_(mean=0, std=1)
-    return data
 
 
 if __name__ == '__main__':
