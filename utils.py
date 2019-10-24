@@ -2,6 +2,7 @@ import logging
 import os.path as osp
 
 import torch
+from scipy.sparse import coo_matrix
 from torch_geometric.utils import to_scipy_sparse_matrix
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 import numpy as np
@@ -76,41 +77,21 @@ def gaussian_fit(data):
     return data
 
 
-def doubly_stochastic_normalization_d(edge_index, edge_attr, num_nodes=None):
-    num_nodes = maybe_num_nodes(edge_index, num_nodes)
-    adj = to_scipy_sparse_matrix(edge_index, edge_attr, num_nodes)
-    adj = adj.toarray()
-
-    tilde_adj = adj / adj.sum(axis=1)
-
-    for u, (i, j) in enumerate(edge_index.t()):
-        E_i_j = 0
-        for k in range(0, num_nodes):
-            E_i_j += tilde_adj[i][k] * tilde_adj[j][k] / tilde_adj[:, k].sum()
-        edge_attr[u] = E_i_j
-
-    return edge_attr
-
-
-def doubly_stochastic_normalization_adj(adj):
+def doubly_stochastic_normalization_2d_tensor(adj):
     """
 
-    :param adj: Numpy array
+    :param adj: 2d Tensor
     :return:
     """
     num_nodes = adj.shape[0]
-
-    tilde_adj = adj / adj.sum(axis=1)
-    col_sums = tilde_adj.sum(axis=1)
-
-    normed_adj = np.zeros_like(adj)
+    tilde_adj = adj / adj.sum(1).reshape(-1, 1)
+    col_sums = tilde_adj.sum(0)
+    normed_adj = torch.zeros_like(adj)
     for i in range(num_nodes):
         for j in range(i, num_nodes):
-            normed_adj[i, j] = np.sum(tilde_adj[i] * tilde_adj[j] / col_sums)
-
+            normed_adj[i, j] = (tilde_adj[i] * tilde_adj[j] / col_sums).sum()
     # to symmetric
-    normed_adj = np.maximum(normed_adj, normed_adj.transpose())
-
+    normed_adj = torch.max(normed_adj, normed_adj.t())
     return normed_adj
 
 
@@ -120,5 +101,44 @@ def positive_transform(conn_matrix):
 
 def transform_e(adj):
     adj = positive_transform(adj)
-    adj = doubly_stochastic_normalization_adj(adj)
     return adj
+
+
+from torch_scatter import scatter_max, scatter_add
+
+
+def real_softmax(src, index, num_nodes=None):
+    r"""Computes a sparsely evaluated softmax.
+    Given a value tensor :attr:`src`, this function first groups the values
+    along the first dimension based on the indices specified in :attr:`index`,
+    and then proceeds to compute the softmax individually for each group.
+
+    Args:
+        src (Tensor): The source tensor.
+        index (LongTensor): The indices of elements for applying the softmax.
+        num_nodes (int, optional): The number of nodes, *i.e.*
+            :obj:`max_val + 1` of :attr:`index`. (default: :obj:`None`)
+
+    :rtype: :class:`Tensor`
+    """
+
+    num_nodes = maybe_num_nodes(index, num_nodes)
+
+    # out = src - scatter_max(src, index, dim=0, dim_size=num_nodes)[0][index]
+    out = src.exp()
+    out = out / (
+            scatter_add(out, index, dim=0, dim_size=num_nodes)[index] + 1e-16)
+
+    return out
+
+
+def from_2d_tensor_adj(adj):
+    """
+    maintain gradients
+    Args:
+        A : Tensor
+    """
+    edge_index = adj.nonzero().t().detach()
+    row, col = edge_index
+    edge_weight = adj[row, col]
+    return edge_index, edge_weight

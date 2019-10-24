@@ -29,12 +29,12 @@ class ABIDE(InMemoryDataset):
                  name='ABIDE',
                  transform=None,
                  resample_ts=False,
-                 normalize_edge=False,
+                 transform_edge=False,
                  site='NYU',
                  derivative='func_preproc', pipeline='ccs', strategy='filt_noglobal',
                  extension='.nii.gz',
                  mean_fd_thresh=0.2):
-        self.normalize_edge = normalize_edge
+        self.transform_edge = transform_edge
         self.resample_ts = resample_ts
         self.mean_fd_thresh = mean_fd_thresh
         self.extension = extension
@@ -207,6 +207,10 @@ class ABIDE(InMemoryDataset):
             # phenotypic (for label only)
             y = torch.from_numpy(
                 pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values)
+            # for class label
+            y[y == 1] = 0
+            y[y == 2] = 1
+
             # structural
             lh_df, rh_df = anatomical_features_dict[subject]
             node_features = torch.from_numpy(
@@ -225,7 +229,7 @@ class ABIDE(InMemoryDataset):
             connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
             for conn in connectivity_matrix_list:
-                conn = positive_transform(conn) if self.normalize_edge else conn
+                conn = positive_transform(conn) if self.transform_edge else conn
                 edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(conn))
                 data = Data(x=node_features,
                             edge_index=edge_index,
@@ -238,5 +242,5 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, resample_ts=False, transform_edge=True)
     pass

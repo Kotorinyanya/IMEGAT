@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch_geometric.utils import softmax, remove_self_loops, add_self_loops
 from torch_scatter import scatter_add
 
-from utils import add_self_loops_with_edge_attr
+from utils import add_self_loops_with_edge_attr, real_softmax
 
 
 class EGATConv(torch.nn.Module):
@@ -56,6 +56,8 @@ class EGATConv(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+        self.reset_parameters()
+
     def reset_parameters(self):
         # glorot(self.weight)
         self.weight.data = nn.init.xavier_uniform_(self.weight.data, gain=nn.init.calculate_gain('relu'))
@@ -63,14 +65,8 @@ class EGATConv(torch.nn.Module):
         # uniform(self.att_weight)
         zeros(self.bias)
 
-    def forward(self, batch):
-        num_nodes = batch.num_nodes
-        num_graphs = batch.num_graphs
-        x = batch.x
-        edge_index = batch.edge_index
-        edge_attr = batch.edge_attr
+    def forward(self, x, edge_index, edge_attr):
 
-        x = x.unsqueeze(-1) if x.dim() == 1 else x
         x = torch.mm(x.float(), self.weight)
 
         # Add self-loops to adjacency matrix.
@@ -81,12 +77,13 @@ class EGATConv(torch.nn.Module):
         # Compute attention coefficients
         alpha = torch.cat([x[row], x[col]], dim=-1)
         alpha = (alpha * self.att_weight).sum(dim=-1)
-        alpha = F.relu(alpha)
         # This will broadcast edge_attr across all attentions
-        alpha = torch.mul(alpha, edge_attr.float())
+        alpha = torch.mul(alpha, edge_attr.abs())
+        alpha = F.leaky_relu(alpha, negative_slope=0.2)
+        # alpha = F.relu(alpha)
         # alpha = F.normalize(alpha, p=1, dim=1)
-        # alpha = softmax(alpha, row, num_nodes=num_nodes)
-        alpha = F.sigmoid(alpha)
+        alpha = real_softmax(alpha, row)
+        # alpha = F.sigmoid(alpha)
 
         # Sum up neighborhoods.
         out = alpha.view(-1, 1) * x[col]
@@ -95,7 +92,9 @@ class EGATConv(torch.nn.Module):
         if self.bias is not None:
             out = out + self.bias
 
-        return out, edge_index, alpha
+        assert torch.isnan(out).sum() == 0
+
+        return out, alpha
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
@@ -103,9 +102,11 @@ class EGATConv(torch.nn.Module):
 
 
 class Pool(torch.nn.Module):
-    def __init__(self, conv_blocks=3, hidden_dim=30):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 conv_blocks=3):
         super(Pool, self).__init__()
-        self.hidden_dim = hidden_dim
         self.conv_blocks = conv_blocks
 
     def forward(self, x, edge_index, edge_attr):
@@ -116,7 +117,7 @@ class Pool(torch.nn.Module):
 
 
 if __name__ == '__main__':
-    from data_utils import gaussian_fit
+    from utils import gaussian_fit
     from dataset import ABIDE
 
     dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)

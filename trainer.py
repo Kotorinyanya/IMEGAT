@@ -16,6 +16,8 @@ from utils import get_model_log_dir, to_cuda
 import time
 import numpy as np
 
+torch.autograd.set_detect_anomaly(True)
+
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            weight_decay=1e-2, num_epochs=200, n_splits=10,
                            use_gpu=True, dp=False, ddp=False,
@@ -135,7 +137,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                                      eps=1e-08, weight_decay=weight_decay, amsgrad=False)
         # optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
         if ddp:
-            model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids=device_ids)
+            model = nn.parallel.DistributedDataParallel(model.to(device_ids[0]), device_ids=device_ids)
         elif dp and use_gpu:
             model = model.cuda() if device_ids is None else model.to(device_ids[0])
             model = DataParallel(model, device_ids=device_ids)
@@ -184,7 +186,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     if phase == 'train':
                         # print(torch.autograd.grad(y_hat.sum(), model.saved_x, retain_graph=True))
                         optimizer.zero_grad()
-                        total_loss.backward(retain_graph=True)
+                        total_loss.backward()
                         # nn.utils.clip_grad_norm_(model.parameters(), 2.0)
                         optimizer.step()
 
@@ -277,11 +279,12 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 
 if __name__ == "__main__":
-    from data_utils import gaussian_fit
+    from utils import gaussian_fit
     from dataset import ABIDE
+    from model import Net
     dataset =  ABIDE(root='datasets/NYU', transform=gaussian_fit)
 
     model = Net
     train_cross_validation(model, dataset, comment='', batch_size=20,
                            num_epochs=500, dropout=0.1, lr=1e-3, weight_decay=0,
-                           use_gpu=False, dp=False, ddp=False, device_ids=[4, 5, 6, 7])
+                           use_gpu=True, ddp=False, device_ids=[2,3,4,5])
