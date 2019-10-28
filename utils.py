@@ -141,4 +141,6 @@ def from_2d_tensor_adj(adj):
     edge_index = adj.nonzero().t().detach()
     row, col = edge_index
     edge_weight = adj[row, col]
+
+    assert len(row) == len(edge_weight)
     return edge_index, edge_weight

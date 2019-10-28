@@ -30,10 +30,12 @@ class ABIDE(InMemoryDataset):
                  transform=None,
                  resample_ts=False,
                  transform_edge=False,
+                 atlas='HCPMMP1',
                  site='NYU',
                  derivative='func_preproc', pipeline='ccs', strategy='filt_noglobal',
                  extension='.nii.gz',
                  mean_fd_thresh=0.2):
+        self.atlas = atlas
         self.transform_edge = transform_edge
         self.resample_ts = resample_ts
         self.mean_fd_thresh = mean_fd_thresh
@@ -186,20 +188,28 @@ class ABIDE(InMemoryDataset):
         shell_script_path = osp.join(os.getcwd(), 'create_subj_volume_parcellation.sh')
         process_fs_output(fs_subject_dir, shell_script_path)
 
-        fs_subject_dir = osp.join(fs_subject_dir, 'all_output')
+        if self.atlas == 'HCPMMP1':
+            fs_subject_dir = osp.join(fs_subject_dir, 'all_output')
 
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
 
         correlation_measure = ConnectivityMeasure(kind='correlation')
 
-        # load and transform atlas
-        atlas_nii_file = '/'.join([self.root, 'raw', self.raw_file_names[4]])
-        atlas_img = image.load_img(atlas_nii_file)
-        atlas_img.get_data()[atlas_img.get_data()[:int(atlas_img.shape[0] / 2 + 1), :, :].nonzero()] += \
-            atlas_img.get_data().max()
+        if self.atlas == 'HCPMMP1':
+            # load and transform atlas
+            atlas_nii_file = '/'.join([self.root, 'raw', self.raw_file_names[4]])
+            atlas_img = image.load_img(atlas_nii_file)
+            atlas_img.get_data()[atlas_img.get_data()[:int(atlas_img.shape[0] / 2 + 1), :, :].nonzero()] += \
+                atlas_img.get_data().max()
+            num_nodes = 360
+        elif self.atlas == 'destrieux':
+            from nilearn.datasets import fetch_atlas_destrieux_2009
+            atlas_nii_file = fetch_atlas_destrieux_2009().maps
+            atlas_img = image.load_img(atlas_nii_file)
+            num_nodes = 148
 
-        anatomical_features_dict = read_fs_stats(fs_subject_dir)
+        anatomical_features_dict = read_fs_stats(fs_subject_dir, self.atlas)
         subject_ids = list(anatomical_features_dict.keys())
 
         data_list = []
@@ -216,6 +226,9 @@ class ABIDE(InMemoryDataset):
             node_features = torch.from_numpy(
                 np.concatenate([lh_df[self.anatomical_feature_names].values,
                                 rh_df[self.anatomical_feature_names].values]))
+            if node_features.shape[0] != num_nodes:
+                continue
+
             # functional
             fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
                                       "{}_func_preproc.nii.gz".format(subject)])
@@ -234,7 +247,8 @@ class ABIDE(InMemoryDataset):
                 data = Data(x=node_features,
                             edge_index=edge_index,
                             edge_attr=edge_weight,
-                            y=y)
+                            y=y.unsqueeze(0))
+                data.num_nodes = data.x.shape[0]
                 data_list.append(data)
 
         self.data, self.slices = self.collate(data_list)
@@ -242,5 +256,6 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, resample_ts=False, transform_edge=True)
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, resample_ts=False, transform_edge=True,
+                  atlas='destrieux')
     pass

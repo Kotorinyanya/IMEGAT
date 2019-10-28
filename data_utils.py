@@ -1,5 +1,3 @@
-
-
 def find(pattern, path):
     import os, fnmatch
     result = []
@@ -10,13 +8,16 @@ def find(pattern, path):
     return result
 
 
-def read_fs_stats_file(stats_file):
+def read_fs_stats_file(stats_file, atlas):
     import pandas as pd
     """
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
     """
-    skip_rows = list(range(0, 59))  # 53 for legacy
+    if atlas == 'HCPMMP1':
+        skip_rows = list(range(0, 59))  # 53 for legacy
+    elif atlas == 'destrieux':
+        skip_rows = list(range(0, 53))
     names = ['StructName',
              'NumVert',
              'SurfArea',
@@ -28,22 +29,27 @@ def read_fs_stats_file(stats_file):
              'FoldInd',
              'CurvInd']
     df = pd.read_csv(stats_file, sep=' +', skiprows=skip_rows, names=names)
-    df = df[1:]  # remove subcrotical (not for legacy)
+    if atlas == 'HCPMMP1':
+        df = df[1:]  # remove subcrotical (not for legacy)
     return df
 
 
-def read_fs_stats(root):
+def read_fs_stats(root, atlas):
     """
 
     :param root:
     :return: res_dict {subject_id: (lh_df, rh_df)}
     """
-    stats_files = find('*.stats', root)
+    if atlas == 'HCPMMP1':
+        patten = '*HCPMMP1.stats'
+    elif atlas == 'destrieux':
+        patten = '*aparc.a2009s.stats'
+    stats_files = find(patten, root)
     res_dict = {}
     for lh_file, rh_file in zip(stats_files[0::2], stats_files[1::2]):
         subject_id = lh_file.split('/')[-3]
-        lh_df = read_fs_stats_file(lh_file)
-        rh_df = read_fs_stats_file(rh_file)
+        lh_df = read_fs_stats_file(lh_file, atlas)
+        rh_df = read_fs_stats_file(rh_file, atlas)
         res_dict[subject_id] = (lh_df, rh_df)
     return res_dict
 

@@ -12,7 +12,7 @@ from scipy.sparse import coo_matrix
 
 class Net(nn.Module):
 
-    def __init__(self, writer, dropout=0.0):
+    def __init__(self, writer=None, dropout=0.0):
         super(Net, self).__init__()
 
         self.in_channels = 7
@@ -30,7 +30,11 @@ class Net(nn.Module):
             EGATConv(self.hidden_dim, self.hidden_dim),
             EGATConv(self.hidden_dim, self.pool_nodes)
         ])
-        self.pool_fc = nn.Linear(2 * self.hidden_dim + self.pool_nodes, self.pool_nodes)
+        self.pool_fc = nn.Sequential(
+            nn.Linear(2 * self.hidden_dim + self.pool_nodes, 50),
+            nn.ReLU(),
+            nn.Linear(50, self.pool_nodes)
+        )
 
         self.conv2 = nn.ModuleList([
             EGATConv(self.hidden_dim, self.hidden_dim),
@@ -80,14 +84,16 @@ class Net(nn.Module):
         x_conv1_out = self.split_n(x_conv1_out, batch.num_graphs)
         assignment = self.split_n(assignment, batch.num_graphs)
         pooled_x, pooled_adj, link_loss, entropy_loss = dense_diff_pool(x_conv1_out, adj, assignment)
+        reg = link_loss + entropy_loss
 
         # converting data
         data_list = []
         for i in range(batch.num_graphs):
             tmp_adj = pooled_adj[i]
             tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
+            tmp_adj[tmp_adj == 0] = 1e-16  # fully connected
             edge_index, edge_attr = from_2d_tensor_adj(tmp_adj.clone())
-            data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr))
+            data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes))
         tmp_batch = Batch.from_data_list(data_list)
         edge_index, edge_attr = tmp_batch.edge_index, tmp_batch.edge_attr
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
@@ -107,7 +113,7 @@ class Net(nn.Module):
 
         fc_out = self.fc(max_pooled_out_all)
 
-        reg = link_loss + entropy_loss
+        reg = reg.unsqueeze(0) / batch.num_graphs
 
         return fc_out, reg
 
@@ -120,12 +126,46 @@ class Net(nn.Module):
         return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
 
 
+class MLP(nn.Module):
+
+    def __init__(self, writer=None, dropout=0.0):
+        super(MLP, self).__init__()
+
+        self.fc = nn.Sequential(
+            nn.Linear(360 * 7, 32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 2)
+        )
+
+    def forward(self, batch):
+        if type(batch) == list:  # Data list
+            batch = Batch.from_data_list(batch)
+        x = batch.x.to(self.device).float()
+        # edge_attr = batch.edge_attr.to(self.device).float()
+        x = x.reshape(batch.num_graphs, -1)
+        # x = torch.cat([x, edge_attr.reshape(batch.num_graphs, -1)], dim=-1)
+        # x = edge_attr.reshape(batch.num_graphs, -1)
+        out = self.fc(x)
+
+        reg = torch.tensor([0.]).to(self.device)
+
+        return out, reg
+
+    @property
+    def device(self):
+        return self.fc[0].weight.device
+
+
 if __name__ == '__main__':
     from utils import gaussian_fit
     from dataset import ABIDE
 
     dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)
-    model = Net()
+    model = MLP()
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([data])
     model(batch)

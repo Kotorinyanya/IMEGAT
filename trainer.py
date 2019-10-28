@@ -16,7 +16,8 @@ from utils import get_model_log_dir, to_cuda
 import time
 import numpy as np
 
-torch.autograd.set_detect_anomaly(True)
+from livelossplot import PlotLosses
+
 
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            weight_decay=1e-2, num_epochs=200, n_splits=10,
@@ -99,6 +100,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                                                          list(range(dataset.__len__()))),
                                              desc='models', leave=False):
         fold += 1
+        liveloss = PlotLosses()
 
         # for a specific fold
         if fold_no is not None:
@@ -149,6 +151,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         best_map, patience_counter, best_score = 0.0, 0, -np.inf
         for epoch in tqdm_notebook(range(1, num_epochs + 1), desc='Epoch', leave=False):
+            logs = {}
 
             for phase in ['train', 'validation']:
 
@@ -174,7 +177,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         data_list = to_cuda(data_list, (device_ids[0] if device_ids is not None else 'cuda'))
 
                     y_hat, reg = model(data_list)
-                    y_hat = y_hat.reshape(batch_size, -1)
+                    # y_hat = y_hat.reshape(batch_size, -1)
 
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
                     for data in data_list:
@@ -187,7 +190,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         # print(torch.autograd.grad(y_hat.sum(), model.saved_x, retain_graph=True))
                         optimizer.zero_grad()
                         total_loss.backward()
-                        # nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+                        nn.utils.clip_grad_norm_(model.parameters(), 2.0)
                         optimizer.step()
 
                     _, predicted = torch.max(y_hat, 1)
@@ -200,8 +203,8 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
                     epoch_yhat_0 = torch.cat([epoch_yhat_0, y_hat[:, 0].detach().view(-1).cpu()])
                     epoch_yhat_1 = torch.cat([epoch_yhat_1, y_hat[:, 1].detach().view(-1).cpu()])
-                    epoch_label = torch.cat([epoch_label, label.detach().cpu().float()])
-                    epoch_predicted = torch.cat([epoch_predicted, predicted.detach().cpu().float()])
+                    epoch_label = torch.cat([epoch_label, label.detach().float().view(-1).cpu()])
+                    epoch_predicted = torch.cat([epoch_predicted, predicted.detach().float().view(-1).cpu()])
 
                 precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted, average='micro')
                 recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted, average='micro')
@@ -211,6 +214,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                 epoch_nll_loss = running_nll_loss / dataloader.__len__()
                 epoch_reg_loss = running_reg_loss / dataloader.dataset.__len__()
 
+                # print('epoch {} {}_nll_loss: {}'.format(epoch, phase, epoch_nll_loss))
                 writer.add_scalars('nll_loss',
                                    {'{}_nll_loss'.format(phase): epoch_nll_loss},
                                    epoch)
@@ -275,6 +279,16 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         print("Stopped at epoch {}".format(epoch))
                         return
 
+                prefix = ''
+                if phase == 'validation':
+                    prefix = 'val_'
+
+                logs[prefix + 'log loss'] = epoch_nll_loss
+                logs[prefix + 'accuracy'] = accuracy
+
+                liveloss.update(logs)
+                liveloss.draw()
+
     print("Done !")
 
 
@@ -282,9 +296,10 @@ if __name__ == "__main__":
     from utils import gaussian_fit
     from dataset import ABIDE
     from model import Net
-    dataset =  ABIDE(root='datasets/NYU', transform=gaussian_fit)
+
+    dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)
 
     model = Net
-    train_cross_validation(model, dataset, comment='', batch_size=20,
+    train_cross_validation(model, dataset, comment='', batch_size=10,
                            num_epochs=500, dropout=0.1, lr=1e-3, weight_decay=0,
-                           use_gpu=True, ddp=False, device_ids=[2,3,4,5])
+                           use_gpu=True, dp=False, ddp=False, device_ids=[2])
