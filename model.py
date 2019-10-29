@@ -63,19 +63,24 @@ class Net(nn.Module):
             for data in batch.to_data_list()], dim=0)
 
         out_all = []
+        alpha_reg_all = []
 
         # conv1
-        alpha = edge_attr
+        a, ei = edge_attr, edge_index
         for conv_block in self.conv1:
-            x, alpha = conv_block(x, edge_index, alpha)
+            x, a, ei, ea = conv_block(x, ei, a)
             out_all.append(x)
+            alpha_reg_all.append(entropy(a, ei).mean())
+            print(a)
+            print(x)
 
         # soft pooling
         pool_conv_out_all = []
-        alpha = edge_attr
+        a, ei = edge_attr, edge_index
         x = batch.x.to(self.device)  # orig x
         for conv_block in self.pool_conv:
-            x, alpha = conv_block(x, edge_index, alpha)
+            x, a, ei, ea = conv_block(x, ei, a)
+            alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
         assignment = self.pool_fc(pool_conv_out_all)
@@ -100,11 +105,11 @@ class Net(nn.Module):
         pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
         # conv2
-        alpha = edge_attr
+        a, ei = edge_attr, edge_index
         x = pooled_x
         for conv_block in self.conv2:
-            x, alpha = conv_block(x, edge_index, alpha)
-            assert torch.isnan(x).sum() == 0
+            x, a, ei, ea = conv_block(x, ei, a)
+            alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
 
         # max pooling
@@ -113,6 +118,7 @@ class Net(nn.Module):
 
         fc_out = self.fc(max_pooled_out_all)
 
+        reg += torch.mean(torch.stack(alpha_reg_all))
         reg = reg.unsqueeze(0) / batch.num_graphs
 
         return fc_out, reg
@@ -164,8 +170,8 @@ if __name__ == '__main__':
     from utils import gaussian_fit
     from dataset import ABIDE
 
-    dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)
-    model = MLP()
+    dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    model = Net()
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([data])
     model(batch)

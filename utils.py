@@ -132,6 +132,18 @@ def real_softmax(src, index, num_nodes=None):
     return out
 
 
+def entropy(src, edge_index, num_nodes=None):
+    EPS = 1e-15
+    index, _ = edge_index
+    num_nodes = maybe_num_nodes(index, num_nodes)
+
+    # out = src - scatter_max(src, index, dim=0, dim_size=num_nodes)[0][index]
+    out = -src * torch.log(src + EPS)
+    out = scatter_add(out, index, dim=0, dim_size=num_nodes)
+
+    return out
+
+
 def from_2d_tensor_adj(adj):
     """
     maintain gradients

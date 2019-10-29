@@ -94,7 +94,7 @@ class EGATConv(torch.nn.Module):
 
         assert torch.isnan(out).sum() == 0
 
-        return out, alpha
+        return out, alpha, edge_index, edge_attr
 
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
