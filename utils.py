@@ -104,6 +104,13 @@ def transform_e(adj):
     return adj
 
 
+def chunks(l, n):
+    # For item i in a range that is a length of l,
+    for i in range(0, len(l), n):
+        # Create an index range for l of n items:
+        yield l[i:i + n]
+
+
 from torch_scatter import scatter_max, scatter_add
 
 
@@ -124,16 +131,18 @@ def real_softmax(src, index, num_nodes=None):
 
     num_nodes = maybe_num_nodes(index, num_nodes)
 
-    # out = src - scatter_max(src, index, dim=0, dim_size=num_nodes)[0][index]
+    src = src - scatter_max(src, index, dim=0, dim_size=num_nodes)[0][index]
     out = src.exp()
-    out = out / (
+    assert not nan_or_inf(out)
+    oout = out / (
             scatter_add(out, index, dim=0, dim_size=num_nodes)[index] + 1e-16)
+    assert not nan_or_inf(oout)
 
-    return out
+    return oout
 
 
 def entropy(src, edge_index, num_nodes=None):
-    EPS = 1e-15
+    EPS = 1e-32
     index, _ = edge_index
     num_nodes = maybe_num_nodes(index, num_nodes)
 
@@ -156,3 +165,7 @@ def from_2d_tensor_adj(adj):
 
     assert len(row) == len(edge_weight)
     return edge_index, edge_weight
+
+
+def nan_or_inf(x):
+    return torch.isnan(x).any() or x.eq(float('inf')).any() or x.eq(float('-inf')).any()

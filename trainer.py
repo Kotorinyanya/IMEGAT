@@ -93,7 +93,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     criterion = nn.CrossEntropyLoss()
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
-    folds, fold = KFold(n_splits=n_splits, shuffle=True, random_state=seed), 0
+    folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
     print(dataset.__len__())
 
     for train_idx, test_idx in tqdm_notebook(folds.split(list(range(dataset.__len__())),
@@ -293,13 +293,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 
 if __name__ == "__main__":
-    from utils import gaussian_fit
+    from utils import z_score_norm_data
     from dataset import ABIDE
     from model import Net
-
-    dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)
-
+    dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
     model = Net
-    train_cross_validation(model, dataset, comment='', batch_size=10,
-                           num_epochs=500, dropout=0.1, lr=1e-3, weight_decay=0,
-                           use_gpu=True, dp=False, ddp=False, device_ids=[2])
+    train_cross_validation(model, dataset, comment='test_net', batch_size=15, patience=200,
+                           num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0,
+                           use_gpu=True, dp=False, ddp=False, device_ids=[4, 5, 6, 7], cuda_device=5)

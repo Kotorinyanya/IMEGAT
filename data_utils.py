@@ -74,6 +74,21 @@ def resample_temporal(time_series, time_window=30):
     return time_series_list
 
 
+def top_k_percent_adj(adj, k):
+    import numpy as np
+    # remove self-connection
+    np.fill_diagonal(adj, 0)
+    # sort and get threshold
+    sorted_arr = np.sort(adj.flatten())
+    idx = k if type(k) == int else int(k * len(sorted_arr))
+    threshold = sorted_arr[-idx]
+    # threshold
+    adj[np.abs(adj) < threshold] = 0
+    # add self-connection
+    np.fill_diagonal(adj, 1)
+    return adj
+
+
 def download_freesurfer_output(site, out_dir):
     # Import packages
     import os
@@ -173,6 +188,16 @@ def download_freesurfer_output(site, out_dir):
 
     # Print all done
     print('Done!')
+
+
+def label_from_pheno(pheno_df, subject):
+    import torch
+    y = torch.from_numpy(
+        pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values)
+    # for class label
+    y[y == 1] = 0
+    y[y == 2] = 1
+    return y
 
 
 def chunks(l, n):

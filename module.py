@@ -10,10 +10,30 @@ from torch_geometric.data import Batch
 from boxx import timeit
 
 import torch.nn.functional as F
-from torch_geometric.utils import softmax, remove_self_loops, add_self_loops
+from torch_geometric.utils import softmax, remove_self_loops, add_self_loops, dropout_adj
 from torch_scatter import scatter_add
 
-from utils import add_self_loops_with_edge_attr, real_softmax
+from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf
+
+
+class MEGATConv(torch.nn.Module):
+
+    def __init__(self,
+                 heads,
+                 in_channels,
+                 out_channels,
+                 att_dropout=0,
+                 bias=True,
+                 concat=True):
+        super(MEGATConv, self).__init__()
+
+        self.convs = nn.ModuleList([
+            EGATConv(in_channels, out_channels, att_dropout=att_dropout, bias=bias)
+            for _ in range(heads)
+        ])
+
+    def forward(self, x, edge_index, edge_attr):
+        pass
 
 
 class EGATConv(torch.nn.Module):
@@ -25,9 +45,7 @@ class EGATConv(torch.nn.Module):
             :obj:`1`)
         concat (bool, optional): Whether to concat or average multi-head
             attentions (default: :obj:`True`)
-        negative_slope (float, optional): LeakyRELU angle of the negative
-            slope. (default: :obj:`0.2`)
-        dropout (float, optional): Dropout probability of the normalized
+        att_dropout (float, optional): Dropout probability of the normalized
             attention coefficients, i.e. exposes each node to a stochastically
             sampled neighborhood during training. (default: :obj:`0`)
         bias (bool, optional): If set to :obj:`False`, the layer will not learn
@@ -37,19 +55,19 @@ class EGATConv(torch.nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 dropout=0,
+                 att_dropout=0,
                  bias=True):
         super(EGATConv, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.dropout = dropout
-
-        self.drop = nn.Dropout(dropout)
+        self.att_dropout = att_dropout
 
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
-        self.att_weight = Parameter(torch.Tensor(1, 2 * out_channels))
+        self.att_weight = Parameter(torch.Tensor(2 * in_channels, 1))
+
+        self.att_drop = nn.Dropout(att_dropout)
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -67,23 +85,23 @@ class EGATConv(torch.nn.Module):
 
     def forward(self, x, edge_index, edge_attr):
 
-        x = torch.mm(x.float(), self.weight)
-
-        # Add self-loops to adjacency matrix.
         edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-        edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
         row, col = edge_index
 
         # Compute attention coefficients
         alpha = torch.cat([x[row], x[col]], dim=-1)
-        alpha = (alpha * self.att_weight).sum(dim=-1)
+        alpha = (alpha @ self.att_weight).squeeze(-1)
         # This will broadcast edge_attr across all attentions
-        alpha = torch.mul(alpha, edge_attr.abs())
-        alpha = F.leaky_relu(alpha, negative_slope=0.2)
-        # alpha = F.relu(alpha)
-        # alpha = F.normalize(alpha, p=1, dim=1)
-        alpha = real_softmax(alpha, row)
-        # alpha = F.sigmoid(alpha)
+        alpha = alpha * edge_attr.abs()
+        alpha = F.leaky_relu(alpha, negative_slope=10)
+        alpha = softmax(alpha, row)
+        # Dropout attentions
+        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout)
+
+        x = x @ self.weight
+
+        edge_index, alpha = add_self_loops(edge_index, alpha)
+        row, col = edge_index
 
         # Sum up neighborhoods.
         out = alpha.view(-1, 1) * x[col]
@@ -92,37 +110,22 @@ class EGATConv(torch.nn.Module):
         if self.bias is not None:
             out = out + self.bias
 
-        assert torch.isnan(out).sum() == 0
+        assert not nan_or_inf(out)
 
         return out, alpha, edge_index, edge_attr
 
     def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
-                                   self.out_channels)
-
-
-class Pool(torch.nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 conv_blocks=3):
-        super(Pool, self).__init__()
-        self.conv_blocks = conv_blocks
-
-    def forward(self, x, edge_index, edge_attr):
-        pass
-
-    def __repr__(self):
-        return '{}()'.format(self.__class__.__name__)
+        return '{}({}, {}, att_dropout={})'.format(self.__class__.__name__, self.in_channels,
+                                                   self.out_channels, self.att_dropout)
 
 
 if __name__ == '__main__':
-    from utils import gaussian_fit
+    from utils import z_score_norm_data
     from dataset import ABIDE
 
-    dataset = ABIDE(root='datasets/NYU', transform=gaussian_fit)
-    conv = EGATConv(7, 30)
+    dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    conv = EGATConv(11, 30)
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([data])
-    conv(batch)
+    conv(batch.x, batch.edge_index, batch.edge_attr)
     pass

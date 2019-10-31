@@ -1,13 +1,16 @@
 import torch.nn.functional as F
 from torch_geometric.data import Batch, Data
 from torch_geometric.nn import dense_diff_pool
+from torch_geometric.nn import global_max_pool, global_mean_pool
 
 # from torch_geometric.nn import GCNConv
 from module import EGATConv
 from utils import *
 from torch import nn
 from torch_geometric.utils import to_scipy_sparse_matrix, from_scipy_sparse_matrix
+from torch.nn import BatchNorm1d
 from scipy.sparse import coo_matrix
+import matplotlib.pyplot as plt
 
 
 class Net(nn.Module):
@@ -15,38 +18,50 @@ class Net(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(Net, self).__init__()
 
-        self.in_channels = 7
+        self.in_channels = 11
         self.hidden_dim = 30
         self.pool_nodes = 16
+        self.block_chunk_size = 2
 
         self.conv1 = nn.ModuleList([
             EGATConv(self.in_channels, self.hidden_dim),
+            BatchNorm1d(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim)
+            BatchNorm1d(self.hidden_dim),
+            EGATConv(self.hidden_dim, self.hidden_dim),
+            BatchNorm1d(self.hidden_dim),
         ])
 
         self.pool_conv = nn.ModuleList([
             EGATConv(self.in_channels, self.hidden_dim),
+            BatchNorm1d(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            EGATConv(self.hidden_dim, self.pool_nodes)
+            BatchNorm1d(self.hidden_dim),
+            EGATConv(self.hidden_dim, self.pool_nodes),
+            BatchNorm1d(self.pool_nodes),
         ])
         self.pool_fc = nn.Sequential(
             nn.Linear(2 * self.hidden_dim + self.pool_nodes, 50),
+            nn.BatchNorm1d(50),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(50, self.pool_nodes)
         )
 
         self.conv2 = nn.ModuleList([
             EGATConv(self.hidden_dim, self.hidden_dim),
+            BatchNorm1d(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim)
+            BatchNorm1d(self.hidden_dim),
+            EGATConv(self.hidden_dim, self.hidden_dim),
+            BatchNorm1d(self.hidden_dim),
         ])
 
-        out_count = len(self.conv1) + len(self.conv2)
-
         self.fc = nn.Sequential(
-            nn.Linear(self.hidden_dim * out_count, 50),
+            nn.Linear(self.hidden_dim * 6, 50),
+            nn.BatchNorm1d(50),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(50, 2)
         )
 
@@ -63,24 +78,24 @@ class Net(nn.Module):
             for data in batch.to_data_list()], dim=0)
 
         out_all = []
-        alpha_reg_all = []
+        # alpha_reg_all = []
 
         # conv1
         a, ei = edge_attr, edge_index
-        for conv_block in self.conv1:
+        for conv_block, norm_block in chunks(self.conv1, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
+            x = norm_block(x)
+            # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
-            alpha_reg_all.append(entropy(a, ei).mean())
-            print(a)
-            print(x)
 
         # soft pooling
         pool_conv_out_all = []
         a, ei = edge_attr, edge_index
         x = batch.x.to(self.device)  # orig x
-        for conv_block in self.pool_conv:
+        for conv_block, norm_block in chunks(self.pool_conv, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            alpha_reg_all.append(entropy(a, ei).mean())
+            x = norm_block(x)
+            # alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
         assignment = self.pool_fc(pool_conv_out_all)
@@ -95,31 +110,33 @@ class Net(nn.Module):
         data_list = []
         for i in range(batch.num_graphs):
             tmp_adj = pooled_adj[i]
-            tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
-            tmp_adj[tmp_adj == 0] = 1e-16  # fully connected
+            # tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
+            # tmp_adj[tmp_adj == 0] = 1e-16  # fully connected
             edge_index, edge_attr = from_2d_tensor_adj(tmp_adj.clone())
             data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes))
-        tmp_batch = Batch.from_data_list(data_list)
-        edge_index, edge_attr = tmp_batch.edge_index, tmp_batch.edge_attr
+        p1_batch = Batch.from_data_list(data_list)
+        edge_index, edge_attr = p1_batch.edge_index, p1_batch.edge_attr
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
-        pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
+        # pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
         # conv2
         a, ei = edge_attr, edge_index
         x = pooled_x
-        for conv_block in self.conv2:
+        for conv_block, norm_block in chunks(self.conv2, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            alpha_reg_all.append(entropy(a, ei).mean())
+            x = norm_block(x)
+            # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
 
-        # max pooling
-        max_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
-        max_pooled_out_all = torch.cat(max_pooled_out_all, dim=-1)
+        # global pooling
+        # global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
+        global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
+        global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
 
-        fc_out = self.fc(max_pooled_out_all)
+        fc_out = self.fc(global_pooled_out_all)
 
-        reg += torch.mean(torch.stack(alpha_reg_all))
-        reg = reg.unsqueeze(0) / batch.num_graphs
+        # reg += torch.mean(torch.stack(alpha_reg_all))
+        reg = reg.unsqueeze(0)
 
         return fc_out, reg
 
@@ -138,7 +155,7 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
 
         self.fc = nn.Sequential(
-            nn.Linear(360 * 7, 32),
+            nn.Linear(360 * 11, 32),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(32, 32),

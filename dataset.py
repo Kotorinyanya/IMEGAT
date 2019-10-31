@@ -18,10 +18,13 @@ from tqdm import tqdm
 import os
 import urllib.request as request
 
+from scipy.stats import kurtosis, skew
+
 from utils import z_score_norm_data, positive_transform
 
 from data_utils import read_fs_stats, extract_time_series, download_freesurfer_output, \
-    process_fs_output, resample_temporal
+    process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
+from nilearn.plotting import plot_connectome
 
 
 class ABIDE(InMemoryDataset):
@@ -30,11 +33,32 @@ class ABIDE(InMemoryDataset):
                  transform=None,
                  resample_ts=False,
                  transform_edge=False,
+                 use_edge_weight_as_node_feature=True,
+                 threshold=None,
                  atlas='HCPMMP1',
                  site='NYU',
                  derivative='func_preproc', pipeline='ccs', strategy='filt_noglobal',
                  extension='.nii.gz',
                  mean_fd_thresh=0.2):
+        """
+
+        :param root: data directory
+        :param name: ABIDE
+        :param transform: transform at run
+        :param resample_ts: bool, for data augmentation
+        :param transform_edge: bool, positive transform of edges
+        :param use_edge_weight_as_node_feature: bool
+        :param threshold: float or int
+        :param atlas: str
+        :param site: str
+        :param derivative: str
+        :param pipeline: str
+        :param strategy: str
+        :param extension: str
+        :param mean_fd_thresh: float
+        """
+        self.threshold = threshold
+        self.use_edge_weight_as_node_feature = use_edge_weight_as_node_feature
         self.atlas = atlas
         self.transform_edge = transform_edge
         self.resample_ts = resample_ts
@@ -188,14 +212,15 @@ class ABIDE(InMemoryDataset):
         shell_script_path = osp.join(os.getcwd(), 'create_subj_volume_parcellation.sh')
         process_fs_output(fs_subject_dir, shell_script_path)
 
+        # this is dirty, but who cares?
         if self.atlas == 'HCPMMP1':
             fs_subject_dir = osp.join(fs_subject_dir, 'all_output')
 
+        # phenotypic for label
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
 
-        correlation_measure = ConnectivityMeasure(kind='correlation')
-
+        # for optional atlas
         if self.atlas == 'HCPMMP1':
             # load and transform atlas
             atlas_nii_file = '/'.join([self.root, 'raw', self.raw_file_names[4]])
@@ -209,45 +234,60 @@ class ABIDE(InMemoryDataset):
             atlas_img = image.load_img(atlas_nii_file)
             num_nodes = 148
 
+        # read FreeSurfer output
         anatomical_features_dict = read_fs_stats(fs_subject_dir, self.atlas)
         subject_ids = list(anatomical_features_dict.keys())
 
         data_list = []
         for subject in tqdm(subject_ids):
-            # phenotypic (for label only)
-            y = torch.from_numpy(
-                pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values)
-            # for class label
-            y[y == 1] = 0
-            y[y == 2] = 1
+            y = label_from_pheno(pheno_df, subject)
 
-            # structural
+            # read anatomical features from dict
             lh_df, rh_df = anatomical_features_dict[subject]
-            node_features = torch.from_numpy(
+            anatomical_features = torch.from_numpy(
                 np.concatenate([lh_df[self.anatomical_feature_names].values,
-                                rh_df[self.anatomical_feature_names].values]))
-            if node_features.shape[0] != num_nodes:
+                                rh_df[self.anatomical_feature_names].values])).float()
+            if anatomical_features.shape[0] != num_nodes:
+                # check missing nodes, for 'destrieux'
                 continue
 
-            # functional
+            # path for preprocessed functional MRI
             fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
                                       "{}_func_preproc.nii.gz".format(subject)])
 
+            # nilearn masker and corr
             masker = NiftiLabelsMasker(labels_img=atlas_img, standardize=True,
                                        memory='nilearn_cache', verbose=5)
+            correlation_measure = ConnectivityMeasure(kind='correlation')
             time_series = masker.fit_transform(fmri_nii_file)
 
-            # time_series = extract_time_series(fmri_nii_file, atlas_nii_file)
+            # optional data augmentation
             time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
+
+            # correlation form time series
             connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
-            for conn in connectivity_matrix_list:
-                conn = positive_transform(conn) if self.transform_edge else conn
-                edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(conn))
-                data = Data(x=node_features,
+            for adj in connectivity_matrix_list:
+                # concat statistics of adj to node feature
+                if self.use_edge_weight_as_node_feature:
+                    mean = torch.tensor(adj.mean(-1))
+                    std = torch.tensor(adj.std(-1))
+                    skewness = torch.tensor(skew(adj, axis=-1))
+                    kurto = torch.tensor(kurtosis(adj, axis=-1))
+                    additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
+                    new_node_features = torch.cat([anatomical_features, additional_feature], dim=-1)
+                # positive transform
+                adj = np.abs(adj) if self.transform_edge else adj
+                # set a threshold for adj
+                if self.threshold is not None:
+                    adj = top_k_percent_adj(adj, self.threshold)
+
+                # create torch_geometric Data
+                edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
+                data = Data(x=new_node_features,
                             edge_index=edge_index,
                             edge_attr=edge_weight,
-                            y=y.unsqueeze(0))
+                            y=y)
                 data.num_nodes = data.x.shape[0]
                 data_list.append(data)
 
@@ -256,6 +296,9 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data, resample_ts=False, transform_edge=True,
-                  atlas='destrieux')
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
+                  resample_ts=True, transform_edge=True,
+                  use_edge_weight_as_node_feature=True,
+                  threshold=None,
+                  atlas='HCPMMP1')
     pass
