@@ -89,20 +89,13 @@ def top_k_percent_adj(adj, k):
     return adj
 
 
-def download_abide(sites, out_dir):
-    s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/' \
-                'ABIDE_Initiative'
-    s3_pheno_path = '/'.join([s3_prefix, 'Phenotypic_V1_0b_preprocessed1.csv'])
-
-
-def download_freesurfer_output(site, out_dir):
+def download_abide(out_dir, site=None):
     # Import packages
     import os
     import urllib.request as request
     # Init variables
     mean_fd_thresh = 0.2
-    s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/' \
-                'ABIDE_Initiative'
+    s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/ABIDE_Initiative'
     s3_pheno_path = '/'.join([s3_prefix, 'Phenotypic_V1_0b_preprocessed1.csv'])
     fs_file_list_path = 'fs_file_list.txt'
 
@@ -163,15 +156,16 @@ def download_freesurfer_output(site, out_dir):
         if site is not None and site.lower() != row_site.lower():
             continue
 
-        # functional
+        # add functional to download
         filename = row_file_id + '_' + 'func_preproc' + '.nii.gz'
         s3_path = '/'.join([s3_prefix, 'Outputs', 'ccs', 'filt_noglobal', 'func_preproc', filename])
-        print('Adding {0} to download queue...'.format(s3_path))
+        # print('Adding {0} to download queue...'.format(s3_path))
         s3_paths.append(s3_path)
 
+        # add structural to download
         for fs_file in fs_file_list:
             s3_path = '/'.join([s3_prefix, 'Outputs', 'freesurfer/5.1', row_file_id, fs_file])
-            print('Adding {0} to download queue...'.format(s3_path))
+            # print('Adding {0} to download queue...'.format(s3_path))
             s3_paths.append(s3_path)
 
     # And download the items
@@ -255,6 +249,4 @@ def process_fs_output(fs_subject_dir, sh_script_path):
 
 
 if __name__ == '__main__':
-    # read_fs_stats('datasets/NYU')
-    download_freesurfer_output('NYU', 'datasets/NYU')
-    # process_fs_output('')
+    download_abide('new_datasets/ALL')

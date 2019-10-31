@@ -22,7 +22,7 @@ from scipy.stats import kurtosis, skew
 
 from utils import z_score_norm_data, positive_transform
 
-from data_utils import read_fs_stats, extract_time_series, download_freesurfer_output, \
+from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
 from nilearn.plotting import plot_connectome
 
@@ -95,7 +95,7 @@ class ABIDE(InMemoryDataset):
             os.makedirs(out_dir)
 
         # download entire freesurfer ouput
-        download_freesurfer_output(site=self.site, out_dir=out_dir)
+        download_abide(site=self.site, out_dir=out_dir)
 
         # download .annot
         lh_url = 'https://ndownloader.figshare.com/files/5528816'
