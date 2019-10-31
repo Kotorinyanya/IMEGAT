@@ -1,6 +1,9 @@
 import os
 
 import requests
+import socket
+import socks
+import urllib.request as request
 
 
 def find(pattern, path):
@@ -94,14 +97,18 @@ def top_k_percent_adj(adj, k):
     return adj
 
 
-def fetch_url(out_dir, s3_prefix, s3_path):
+def fetch_url(proxies, out_dir, s3_prefix, s3_path):
     rel_path = s3_path.lstrip(s3_prefix)
     download_file = os.path.join(out_dir, rel_path)
     download_dir = os.path.dirname(download_file)
     if not os.path.exists(download_dir):
-        os.makedirs(download_dir)
+        try:
+            os.makedirs(download_dir)
+        except:  # racing
+            pass
     if not os.path.exists(download_file):
-        r = requests.get(s3_path, stream=True)
+        print('Retrieving: {0}'.format(download_file))
+        r = requests.get(s3_path, stream=True, proxies=proxies)
         if r.status_code == 200:
             with open(download_file, 'wb') as f:
                 for chunk in r:
@@ -110,9 +117,9 @@ def fetch_url(out_dir, s3_prefix, s3_path):
 
 
 def download_abide(out_dir, site=None):
-    # Import packages
-    import os
-    import urllib.request as request
+    proxies = {'http': "socks5://192.168.192.128:1080",
+               'https': "socks5://192.168.192.128:1080"}  # huze
+
     # Init variables
     mean_fd_thresh = 0.2
     s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/ABIDE_Initiative'
@@ -124,8 +131,10 @@ def download_abide(out_dir, site=None):
         os.makedirs(out_dir)
 
     # Load the phenotype file from S3
-    s3_pheno_file = request.urlopen(s3_pheno_path)
-    pheno_list = s3_pheno_file.readlines()
+    # s3_pheno_file = request.urlopen(s3_pheno_path)
+    # pheno_list = s3_pheno_file.readlines()
+    s3_pheno_file = requests.get(s3_pheno_path, allow_redirects=True, proxies=proxies)
+    pheno_list = s3_pheno_file.text.splitlines()
 
     # Load FreeSurfer file list
     with open(fs_file_list_path, 'r') as f:
@@ -133,7 +142,7 @@ def download_abide(out_dir, site=None):
     fs_file_list = [x.strip() for x in content]
 
     # Get header indices
-    header = pheno_list[0].decode().split(',')
+    header = pheno_list[0].split(',')
     try:
         site_idx = header.index('SITE_ID')
         file_idx = header.index('FILE_ID')
@@ -150,7 +159,7 @@ def download_abide(out_dir, site=None):
     for pheno_row in pheno_list[1:]:
 
         # Comma separate the row
-        cs_row = pheno_row.decode().split(',')
+        cs_row = pheno_row.split(',')
 
         try:
             # See if it was preprocessed
@@ -189,22 +198,27 @@ def download_abide(out_dir, site=None):
             s3_paths.append(s3_path)
 
     # And download the items
-    total_num_files = len(s3_paths)
-    for path_idx, s3_path in enumerate(s3_paths):
-        rel_path = s3_path.lstrip(s3_prefix)
-        download_file = os.path.join(out_dir, rel_path)
-        download_dir = os.path.dirname(download_file)
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-        try:
-            if not os.path.exists(download_file):
-                print('Retrieving: {0}'.format(download_file))
-                request.urlretrieve(s3_path, download_file)
-                print('{0:3f}% percent complete'.format(100 * (float(path_idx + 1) / total_num_files)))
-            else:
-                print('File {0} already exists, skipping...'.format(download_file))
-        except Exception as exc:
-            print('There was a problem downloading {0}.\n Check input arguments and try again.'.format(s3_path))
+    from multiprocessing.pool import ThreadPool, Pool
+    from functools import partial
+    download_func = partial(fetch_url, proxies, out_dir, s3_prefix)
+    with Pool(os.cpu_count()) as pool:
+        results = list(pool.imap_unordered(download_func, s3_paths, chunksize=100))
+    # total_num_files = len(s3_paths)
+    # for path_idx, s3_path in enumerate(s3_paths):
+    #     rel_path = s3_path.lstrip(s3_prefix)
+    #     download_file = os.path.join(out_dir, rel_path)
+    #     download_dir = os.path.dirname(download_file)
+    #     if not os.path.exists(download_dir):
+    #         os.makedirs(download_dir)
+    #     try:
+    #         if not os.path.exists(download_file):
+    #             print('Retrieving: {0}'.format(download_file))
+    #             request.urlretrieve(s3_path, download_file)
+    #             print('{0:3f}% percent complete'.format(100 * (float(path_idx + 1) / total_num_files)))
+    #         else:
+    #             print('File {0} already exists, skipping...'.format(download_file))
+    #     except Exception as exc:
+    #         print('There was a problem downloading {0}.\n Check input arguments and try again.'.format(s3_path))
 
     # Print all done
     print('Done!')
