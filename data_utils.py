@@ -1,3 +1,8 @@
+import os
+
+import requests
+
+
 def find(pattern, path):
     import os, fnmatch
     result = []
@@ -87,6 +92,21 @@ def top_k_percent_adj(adj, k):
     # add self-connection
     np.fill_diagonal(adj, 1)
     return adj
+
+
+def fetch_url(out_dir, s3_prefix, s3_path):
+    rel_path = s3_path.lstrip(s3_prefix)
+    download_file = os.path.join(out_dir, rel_path)
+    download_dir = os.path.dirname(download_file)
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+    if not os.path.exists(download_file):
+        r = requests.get(s3_path, stream=True)
+        if r.status_code == 200:
+            with open(download_file, 'wb') as f:
+                for chunk in r:
+                    f.write(chunk)
+    return download_file
 
 
 def download_abide(out_dir, site=None):
