@@ -225,7 +225,7 @@ do
 
 	# Create individual mask files
 	if [[ ${create_individual_masks} == "YES" ]]
-		then 
+		then
 		printf ">> Creating individual region masks for subject ${subject}\n"
 		mkdir -p ${output_dir}/${subject}/masks
 		for ((i=1;i<=${number_labels_L};i+=1))
@@ -262,7 +262,7 @@ do
 		for side in Left Right
 			do printf "$side-Thalamus-Proper\n$side-Caudate\n$side-Pallidum\n$side-Hippocampus\n$side-Amygdala\n$side-Accumbens-area\n" >> ${output_dir}/${subject}/aseg_masks/list_aseg
 		done
-		
+
 		for rois in `cat ${output_dir}/${subject}/aseg_masks/list_aseg`
 			do roi_index=`grep "${rois} " FreeSurferColorLUT.txt | cut -c-2` # the space after ${rois} is not casual
 			fslmaths ${output_dir}/${subject}/${annotation_file}.nii.gz -thr ${roi_index} -uthr ${roi_index} -bin ${output_dir}/${subject}/aseg_masks/${rois}
@@ -274,9 +274,9 @@ do
 	if [[ ${get_anatomical_stats} == "YES" ]]
 		then
 		mkdir -p ${output_dir}/${subject}/stats
-		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/lh.cortex.label -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh white
+		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/lh.cortex.label -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh white >> ${output_dir}/${subject}/log_mris_anatomical_stats_lh
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_lh.txt > ${output_dir}/${subject}/tables/table_lh.txt
-		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/rh.cortex.label -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh white
+		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/rh.cortex.label -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh white >> ${output_dir}/${subject}/log_mris_anatomical_stats_rh
 #		sed '/_H_ROI/d; /???/d' ${output_dir}/temp_${first}_${last}_${rand_id}/table_rh.txt > ${output_dir}/${subject}/tables/table_rh.txt
 #
 #		# Get tables with numerical values only
