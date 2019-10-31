@@ -1,16 +1,13 @@
-import torch.nn.functional as F
 from torch_geometric.data import Batch, Data
 from torch_geometric.nn import dense_diff_pool
-from torch_geometric.nn import global_max_pool, global_mean_pool
 
 # from torch_geometric.nn import GCNConv
 from module import EGATConv
 from utils import *
 from torch import nn
-from torch_geometric.utils import to_scipy_sparse_matrix, from_scipy_sparse_matrix
+from torch_geometric.utils import to_scipy_sparse_matrix
 from torch.nn import BatchNorm1d
-from scipy.sparse import coo_matrix
-import matplotlib.pyplot as plt
+from module import InstanceNorm
 
 
 class Net(nn.Module):
@@ -22,27 +19,31 @@ class Net(nn.Module):
         self.hidden_dim = 30
         self.pool_nodes = 16
         self.block_chunk_size = 2
+        self.first_layer_heads = 5
+        self.first_layer_concat = False
+        self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
+            if self.first_layer_concat else self.hidden_dim
 
         self.conv1 = nn.ModuleList([
-            EGATConv(self.in_channels, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
+            InstanceNorm(self.first_conv_out_size),
+            EGATConv(self.first_conv_out_size, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
         ])
 
         self.pool_conv = nn.ModuleList([
             EGATConv(self.in_channels, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.pool_nodes),
-            BatchNorm1d(self.pool_nodes),
+            InstanceNorm(self.pool_nodes),
         ])
         self.pool_fc = nn.Sequential(
-            nn.Linear(2 * self.hidden_dim + self.pool_nodes, 50),
-            nn.BatchNorm1d(50),
+            nn.Linear(self.hidden_dim + self.hidden_dim + self.pool_nodes, 50),
+            InstanceNorm(50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, self.pool_nodes)
@@ -50,16 +51,16 @@ class Net(nn.Module):
 
         self.conv2 = nn.ModuleList([
             EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.hidden_dim),
-            BatchNorm1d(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
         ])
 
         self.fc = nn.Sequential(
-            nn.Linear(self.hidden_dim * 6, 50),
-            nn.BatchNorm1d(50),
+            nn.Linear(self.first_conv_out_size * 1 + self.hidden_dim * 5, 50),
+            InstanceNorm(50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -71,6 +72,7 @@ class Net(nn.Module):
 
         x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
+        batch_mask = batch.batch.to(self.device)
         adj = torch.stack([
             torch.tensor(to_scipy_sparse_matrix(data.edge_index, data.edge_attr, data.num_nodes).todense(),
                          dtype=torch.float,
@@ -84,7 +86,7 @@ class Net(nn.Module):
         a, ei = edge_attr, edge_index
         for conv_block, norm_block in chunks(self.conv1, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            x = norm_block(x)
+            x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
 
@@ -94,7 +96,7 @@ class Net(nn.Module):
         x = batch.x.to(self.device)  # orig x
         for conv_block, norm_block in chunks(self.pool_conv, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            x = norm_block(x)
+            x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
@@ -116,6 +118,7 @@ class Net(nn.Module):
             data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes))
         p1_batch = Batch.from_data_list(data_list)
         edge_index, edge_attr = p1_batch.edge_index, p1_batch.edge_attr
+        p1_batch_mask = p1_batch.batch.to(self.device)
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
         # pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
@@ -124,13 +127,13 @@ class Net(nn.Module):
         x = pooled_x
         for conv_block, norm_block in chunks(self.conv2, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            x = norm_block(x)
+            x = norm_block(x, p1_batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
 
         # global pooling
-        # global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
-        global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
+        global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
+        # global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
         global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
 
         fc_out = self.fc(global_pooled_out_all)

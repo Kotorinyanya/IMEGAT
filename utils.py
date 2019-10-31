@@ -153,6 +153,22 @@ def entropy(src, edge_index, num_nodes=None):
     return out
 
 
+def add_self_loops_mul(edge_index, edge_weight=None, fill_value=1, num_nodes=None):
+    num_nodes = maybe_num_nodes(edge_index, num_nodes)
+
+    loop_index = torch.arange(0, num_nodes, dtype=torch.long,
+                              device=edge_index.device)
+    loop_index = loop_index.unsqueeze(0).repeat(2, 1)
+
+    if edge_weight is not None:
+        loop_weight = edge_weight.new_full((num_nodes, edge_weight.shape[1]), fill_value)
+        edge_weight = torch.cat([edge_weight, loop_weight], dim=0)
+
+    edge_index = torch.cat([edge_index, loop_index], dim=1)
+
+    return edge_index, edge_weight
+
+
 def from_2d_tensor_adj(adj):
     """
     maintain gradients

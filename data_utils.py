@@ -89,6 +89,12 @@ def top_k_percent_adj(adj, k):
     return adj
 
 
+def download_abide(sites, out_dir):
+    s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/' \
+                'ABIDE_Initiative'
+    s3_pheno_path = '/'.join([s3_prefix, 'Phenotypic_V1_0b_preprocessed1.csv'])
+
+
 def download_freesurfer_output(site, out_dir):
     # Import packages
     import os
