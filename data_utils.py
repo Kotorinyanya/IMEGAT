@@ -235,18 +235,22 @@ def process_fs_output(fs_subject_dir, sh_script_path):
     num_workers = os.cpu_count()
     subject_chunks = chunks(subject_ids, num_workers)
 
-    # save subject list chunks to file
-    all_file_names = []
-    for i, chunk in enumerate(subject_chunks):
-        file_basename = 'subject_list_{}'.format(i)
-        file_path = osp.join(fs_subject_dir, file_basename)
-        with open(file_path, 'w') as f:
-            for item in chunk:
-                f.write("%s\n" % item)
-        all_file_names.append(file_basename)
+    # # save subject list chunks to file
+    # all_file_names = []
+    # for i, chunk in enumerate(subject_chunks):
+    #     file_basename = 'subject_list_{}'.format(i)
+    #     file_path = osp.join(fs_subject_dir, file_basename)
+    #     with open(file_path, 'w') as f:
+    #         for item in chunk:
+    #             f.write("%s\n" % item)
+    #     all_file_names.append(file_basename)
+    # with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
+    #     for item in all_file_names:
+    #         f.write("%s\n" % item)
     with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
-        for item in all_file_names:
-            f.write("%s\n" % item)
+        for item in subject_ids:
+            if item[-1].isdigit() and item[0].isalpha():
+                f.write("%s\n" % item)
 
     cp_cmd = 'cd {} && cp -r $SUBJECTS_DIR/fsaverage ./'.format(fs_subject_dir)
     # os.system(cp_cmd)
@@ -269,4 +273,5 @@ def process_fs_output(fs_subject_dir, sh_script_path):
 
 
 if __name__ == '__main__':
-    download_abide('new_datasets/ALL')
+    # download_abide('new_datasets/ALL')
+    process_fs_output('/data_57/huze/projects/IMEGAT/datasets/ALL/raw/Outputs/freesurfer/5.1', None)
