@@ -7,7 +7,7 @@ from utils import *
 from torch import nn
 from torch_geometric.utils import to_scipy_sparse_matrix
 from torch.nn import BatchNorm1d
-from module import InstanceNorm
+from module import InstanceNorm, StablePool
 
 EPS = 1e-15
 
@@ -24,7 +24,7 @@ class Net(nn.Module):
         self.beta_s = 2
         self.block_chunk_size = 2
         self.first_layer_heads = 5
-        self.first_layer_concat = False
+        self.first_layer_concat = True
         self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
             if self.first_layer_concat else self.hidden_dim
 
@@ -38,22 +38,21 @@ class Net(nn.Module):
         ])
 
         self.pool_conv = nn.ModuleList([
-            EGATConv(self.in_channels, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim),
+            EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
+            InstanceNorm(self.first_conv_out_size),
+            EGATConv(self.first_conv_out_size, self.hidden_dim),
             InstanceNorm(self.hidden_dim),
             EGATConv(self.hidden_dim, self.pool_nodes),
             InstanceNorm(self.pool_nodes),
         ])
         self.pool_fc = nn.Sequential(
-            nn.Linear(self.hidden_dim + self.hidden_dim + self.pool_nodes, 50),
+            nn.Linear(self.first_conv_out_size + self.hidden_dim + self.pool_nodes, 50),
             InstanceNorm(50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, self.pool_nodes)
         )
-        self.pool_s = nn.Parameter(torch.Tensor(self.in_nodes, self.pool_nodes))
-        self.pool_s.data = nn.init.xavier_uniform_(self.pool_s.data, gain=nn.init.calculate_gain('relu'))
+        self.pool_s2 = StablePool(self.in_nodes, self.pool_nodes, self.beta_s)
 
         self.conv2 = nn.ModuleList([
             EGATConv(self.hidden_dim, self.hidden_dim),
@@ -107,9 +106,8 @@ class Net(nn.Module):
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
         assignment = self.pool_fc(pool_conv_out_all)
-        assignment = self.split_n(assignment, batch.num_graphs)
-        pool_assignment = (1 / self.beta_s) * assignment + \
-                          (self.beta_s - 1 / self.beta_s) * self.pool_s
+        pool_assignment = self.split_n(assignment, batch.num_graphs)
+        pool_assignment = self.pool_s2(pool_assignment)
         pool_assignment = torch.softmax(pool_assignment, dim=-1)
 
         # modularity loss
@@ -117,7 +115,7 @@ class Net(nn.Module):
         # entropy loss
         entropy_loss = (-pool_assignment * torch.log(pool_assignment + EPS)).sum(dim=-1).mean()
         pooled_x, pooled_adj = self.dense_diff_pool(self.split_n(out_all[-1], batch.num_graphs),
-                                                                        adj, pool_assignment)
+                                                    adj, pool_assignment)
         reg = entropy_loss + modularity_loss
 
         # converting data
@@ -165,10 +163,6 @@ class Net(nn.Module):
 
     @staticmethod
     def modularity_reg(assignment, edge_index, edge_attr=None):
-        """
-        continues version of negative modularity (with positive value)
-        :return:
-        """
         edge_attr = 1 if edge_attr is None else edge_attr
         row, col = edge_index
         reg = (edge_attr * torch.pow((assignment[row] - assignment[col]), 2).sum(1)).mean()
@@ -176,42 +170,6 @@ class Net(nn.Module):
 
     @staticmethod
     def dense_diff_pool(x, adj, s, mask=None):
-        r"""Differentiable pooling operator from the `"Hierarchical Graph
-        Representation Learning with Differentiable Pooling"
-        <https://arxiv.org/abs/1806.08804>`_ paper
-
-        .. math::
-            \mathbf{X}^{\prime} &= {\mathrm{softmax}(\mathbf{S})}^{\top} \cdot
-            \mathbf{X}
-
-            \mathbf{A}^{\prime} &= {\mathrm{softmax}(\mathbf{S})}^{\top} \cdot
-            \mathbf{A} \cdot \mathrm{softmax}(\mathbf{S})
-
-        based on dense learned assignments :math:`\mathbf{S} \in \mathbb{R}^{B
-        \times N \times C}`.
-        Returns pooled node feature matrix, coarsened adjacency matrix and the
-        auxiliary link prediction objective :math:`\| \mathbf{A} -
-        \mathrm{softmax}(\mathbf{S}) \cdot {\mathrm{softmax}(\mathbf{S})}^{\top}
-        \|_F`.
-
-        Args:
-            x (Tensor): Node feature tensor :math:`\mathbf{X} \in \mathbb{R}^{B
-                \times N \times F}` with batch-size :math:`B`, (maximum)
-                number of nodes :math:`N` for each graph, and feature dimension
-                :math:`F`.
-            adj (Tensor): Adjacency tensor :math:`\mathbf{A} \in \mathbb{R}^{B
-                \times N \times N}`.
-            s (Tensor): Assignment tensor :math:`\mathbf{S} \in \mathbb{R}^{B
-                \times N \times C}` with number of clusters :math:`C`. The softmax
-                does not have to be applied beforehand, since it is executed
-                within this method.
-            mask (BoolTensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes for each graph. (default: :obj:`None`)
-
-        :rtype: (:class:`Tensor`, :class:`Tensor`)
-        """
-
         x = x.unsqueeze(0) if x.dim() == 2 else x
         adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
         s = s.unsqueeze(0) if s.dim() == 2 else s
