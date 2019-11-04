@@ -72,7 +72,7 @@ class ABIDE(InMemoryDataset):
         self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
                                          'ThickStd', 'MeanCurv', 'GausCurv']
         super(ABIDE, self).__init__(root, transform)
-        self.data, self.slices = torch.load(self.processed_paths[0])
+        self.data, self.slices, self.group_vector = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):
@@ -239,65 +239,72 @@ class ABIDE(InMemoryDataset):
         subject_ids = list(anatomical_features_dict.keys())
 
         data_list = []
-        for subject in tqdm(subject_ids):
-            y = label_from_pheno(pheno_df, subject)
+        group_vector, current_group = [], 0
+        failed_subject_list = []
+        for subject in tqdm(subject_ids, desc='subject_list'):
+            try:
+                y = label_from_pheno(pheno_df, subject)
 
-            # read anatomical features from dict
-            lh_df, rh_df = anatomical_features_dict[subject]
-            anatomical_features = torch.from_numpy(
-                np.concatenate([lh_df[self.anatomical_feature_names].values,
-                                rh_df[self.anatomical_feature_names].values])).float()
-            if anatomical_features.shape[0] != num_nodes:
-                # check missing nodes, for 'destrieux'
-                continue
+                # read anatomical features from dict
+                lh_df, rh_df = anatomical_features_dict[subject]
+                anatomical_features = torch.from_numpy(
+                    np.concatenate([lh_df[self.anatomical_feature_names].values,
+                                    rh_df[self.anatomical_feature_names].values])).float()
+                if anatomical_features.shape[0] != num_nodes:
+                    # check missing nodes, for 'destrieux'
+                    continue
 
-            # path for preprocessed functional MRI
-            fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
-                                      "{}_func_preproc.nii.gz".format(subject)])
+                # path for preprocessed functional MRI
+                fmri_nii_file = '/'.join([self.root, 'raw', 'Outputs', self.pipeline, self.strategy, self.derivative,
+                                          "{}_func_preproc.nii.gz".format(subject)])
 
-            # nilearn masker and corr
-            masker = NiftiLabelsMasker(labels_img=atlas_img, standardize=True,
-                                       memory='nilearn_cache', verbose=5)
-            correlation_measure = ConnectivityMeasure(kind='correlation')
-            time_series = masker.fit_transform(fmri_nii_file)
+                # nilearn masker and corr
+                masker = NiftiLabelsMasker(labels_img=atlas_img, standardize=True,
+                                           memory='nilearn_cache', verbose=5)
+                correlation_measure = ConnectivityMeasure(kind='correlation')
+                time_series = masker.fit_transform(fmri_nii_file)
 
-            # optional data augmentation
-            time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
+                # optional data augmentation
+                time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
+                # group vector for cross validation shuffling
+                group_vector += [current_group] * len(time_series_list)
+                current_group += 1
 
-            # correlation form time series
-            connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
+                # correlation form time series
+                connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
-            for adj in connectivity_matrix_list:
-                # concat statistics of adj to node feature
-                if self.use_edge_weight_as_node_feature:
-                    mean = torch.tensor(adj.mean(-1))
-                    std = torch.tensor(adj.std(-1))
-                    skewness = torch.tensor(skew(adj, axis=-1))
-                    kurto = torch.tensor(kurtosis(adj, axis=-1))
-                    additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
-                    new_node_features = torch.cat([anatomical_features, additional_feature], dim=-1)
-                # positive transform
-                adj = np.abs(adj) if self.transform_edge else adj
-                # set a threshold for adj
-                if self.threshold is not None:
-                    adj = top_k_percent_adj(adj, self.threshold)
+                for adj in connectivity_matrix_list:
+                    # concat statistics of adj to node feature
+                    if self.use_edge_weight_as_node_feature:
+                        mean = torch.tensor(adj.mean(-1))
+                        std = torch.tensor(adj.std(-1))
+                        skewness = torch.tensor(skew(adj, axis=-1))
+                        kurto = torch.tensor(kurtosis(adj, axis=-1))
+                        additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
+                        new_node_features = torch.cat([anatomical_features, additional_feature], dim=-1)
+                    # positive transform (to distance)
+                    adj = 1 - np.sqrt((1 - adj) / 2) if self.transform_edge else adj
+                    # set a threshold for adj
+                    if self.threshold is not None:
+                        adj = top_k_percent_adj(adj, self.threshold)
 
-                # create torch_geometric Data
-                edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
-                data = Data(x=new_node_features,
-                            edge_index=edge_index,
-                            edge_attr=edge_weight,
-                            y=y)
-                data.num_nodes = data.x.shape[0]
-                data_list.append(data)
-
+                    # create torch_geometric Data
+                    edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
+                    data = Data(x=new_node_features,
+                                edge_index=edge_index,
+                                edge_attr=edge_weight,
+                                y=y)
+                    data.num_nodes = data.x.shape[0]
+                    data_list.append(data)
+            except:
+                failed_subject_list.append(subject)
         self.data, self.slices = self.collate(data_list)
-        torch.save((self.data, self.slices), self.processed_paths[0])
+        torch.save((self.data, self.slices, group_vector), self.processed_paths[0])
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
-                  resample_ts=True, transform_edge=True,
+    abide = ABIDE(root='datasets/ALL', transform=z_score_norm_data,
+                  resample_ts=False, transform_edge=True,
                   use_edge_weight_as_node_feature=True,
                   threshold=None,
                   atlas='HCPMMP1')

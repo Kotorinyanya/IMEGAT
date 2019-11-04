@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from torch_geometric.nn import DataParallel
 from boxx import timeit
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupShuffleSplit
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
@@ -26,8 +26,9 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            num_workers=0, pin_memory=False, cuda_device=None,
                            ddp_port='23456', fold_no=None, saved_model_path=None,
                            device_ids=None, patience=20, seed=None, save_model=False,
-                           is_reg=True):
+                           is_reg=True, live_loss=True):
     """
+    :param live_loss: bool
     :param is_reg: bool
     :param save_model: bool
     :param seed:
@@ -93,14 +94,16 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     criterion = nn.CrossEntropyLoss()
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
-    folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
+    # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
+    folds, fold = GroupShuffleSplit(n_splits=n_splits, random_state=seed), 0
     print(dataset.__len__())
 
     for train_idx, test_idx in tqdm_notebook(folds.split(list(range(dataset.__len__())),
-                                                         list(range(dataset.__len__()))),
+                                                         list(range(dataset.__len__())),
+                                                         dataset.group_vector),
                                              desc='models', leave=False):
         fold += 1
-        liveloss = PlotLosses()
+        liveloss = PlotLosses() if live_loss else None
 
         # for a specific fold
         if fold_no is not None:
@@ -279,15 +282,16 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         print("Stopped at epoch {}".format(epoch))
                         return
 
-                prefix = ''
-                if phase == 'validation':
-                    prefix = 'val_'
+                if live_loss:
+                    prefix = ''
+                    if phase == 'validation':
+                        prefix = 'val_'
 
-                logs[prefix + 'log loss'] = epoch_nll_loss
-                logs[prefix + 'accuracy'] = accuracy
+                    logs[prefix + 'log loss'] = epoch_nll_loss
+                    logs[prefix + 'accuracy'] = accuracy
 
-                liveloss.update(logs)
-                liveloss.draw()
+                    liveloss.update(logs)
+                    liveloss.draw()
 
     print("Done !")
 
@@ -296,6 +300,7 @@ if __name__ == "__main__":
     from utils import z_score_norm_data
     from dataset import ABIDE
     from model import Net
+
     dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
     model = Net
     train_cross_validation(model, dataset, comment='test_net', batch_size=5, patience=200,

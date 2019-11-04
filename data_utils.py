@@ -13,16 +13,22 @@ def find(pattern, path):
     return result
 
 
+def first_uncommented(stats_file):
+    with open(stats_file, 'r') as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line[0] != '#':
+            return i
+
+
 def read_fs_stats_file(stats_file, atlas):
     import pandas as pd
     """
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
     """
-    if atlas == 'HCPMMP1':
-        skip_rows = list(range(0, 59))  # 53 for legacy
-    elif atlas == 'destrieux':
-        skip_rows = list(range(0, 53))
+    first_line = first_uncommented(stats_file)
+    skip_rows = list(range(0, first_line))
     names = ['StructName',
              'NumVert',
              'SurfArea',
@@ -35,7 +41,7 @@ def read_fs_stats_file(stats_file, atlas):
              'CurvInd']
     df = pd.read_csv(stats_file, sep=' +', skiprows=skip_rows, names=names)
     if atlas == 'HCPMMP1':
-        df = df[1:]  # remove subcrotical (not for legacy)
+        df = df[1:]  # remove sub-crotical (not for legacy)
     return df
 
 
@@ -45,17 +51,29 @@ def read_fs_stats(root, atlas):
     :param root:
     :return: res_dict {subject_id: (lh_df, rh_df)}
     """
+    from tqdm import tqdm
+
     if atlas == 'HCPMMP1':
         patten = '*HCPMMP1.stats'
     elif atlas == 'destrieux':
         patten = '*aparc.a2009s.stats'
     stats_files = find(patten, root)
     res_dict = {}
-    for lh_file, rh_file in zip(stats_files[0::2], stats_files[1::2]):
-        subject_id = lh_file.split('/')[-3]
-        lh_df = read_fs_stats_file(lh_file, atlas)
-        rh_df = read_fs_stats_file(rh_file, atlas)
-        res_dict[subject_id] = (lh_df, rh_df)
+    failed_subjects = []
+    for lh_file, rh_file in tqdm(zip(stats_files[0::2], stats_files[1::2]), desc='read_fs_stats',
+                                 total=len(stats_files) / 2):
+        assert lh_file.split('/')[-3] == rh_file.split('/')[-3]  # same subject
+        try:
+            subject_id = lh_file.split('/')[-3]
+            lh_df = read_fs_stats_file(lh_file, atlas)
+            rh_df = read_fs_stats_file(rh_file, atlas)
+            if lh_df.empty or rh_df.empty:
+                failed_subjects.append(subject_id)
+            else:
+                res_dict[subject_id] = (lh_df, rh_df)
+        except:
+            failed_subjects.append(subject_id)
+    # assert len(failed_subjects) == 0
     return res_dict
 
 
@@ -74,7 +92,11 @@ def resample_temporal(time_series, time_window=30):
     length = time_series.shape[0]
     for start in range(0, length, time_window):
         end = start + time_window
-        end = length - 1 if end >= length else end
+        next_end = end + time_window
+        if next_end >= length:
+            end = length - 1
+            time_series_list.append(time_series[start:end])
+            break
         time_series_list.append(time_series[start:end])
     return time_series_list
 
