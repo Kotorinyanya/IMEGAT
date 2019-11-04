@@ -16,16 +16,22 @@ def find(pattern, path):
     return result
 
 
+def first_uncommented(stats_file):
+    with open(stats_file, 'r') as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line[0] != '#':
+            return i
+
+
 def read_fs_stats_file(stats_file, atlas):
     import pandas as pd
     """
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
     """
-    if atlas == 'HCPMMP1':
-        skip_rows = list(range(0, 59))  # 53 for legacy
-    elif atlas == 'destrieux':
-        skip_rows = list(range(0, 53))
+    first_line = first_uncommented(stats_file)
+    skip_rows = list(range(0, first_line))
     names = ['StructName',
              'NumVert',
              'SurfArea',
@@ -38,7 +44,7 @@ def read_fs_stats_file(stats_file, atlas):
              'CurvInd']
     df = pd.read_csv(stats_file, sep=' +', skiprows=skip_rows, names=names)
     if atlas == 'HCPMMP1':
-        df = df[1:]  # remove subcrotical (not for legacy)
+        df = df[1:]  # remove sub-crotical (not for legacy)
     return df
 
 
@@ -48,17 +54,29 @@ def read_fs_stats(root, atlas):
     :param root:
     :return: res_dict {subject_id: (lh_df, rh_df)}
     """
+    from tqdm import tqdm
+
     if atlas == 'HCPMMP1':
         patten = '*HCPMMP1.stats'
     elif atlas == 'destrieux':
         patten = '*aparc.a2009s.stats'
     stats_files = find(patten, root)
     res_dict = {}
-    for lh_file, rh_file in zip(stats_files[0::2], stats_files[1::2]):
-        subject_id = lh_file.split('/')[-3]
-        lh_df = read_fs_stats_file(lh_file, atlas)
-        rh_df = read_fs_stats_file(rh_file, atlas)
-        res_dict[subject_id] = (lh_df, rh_df)
+    failed_subjects = []
+    for lh_file, rh_file in tqdm(zip(stats_files[0::2], stats_files[1::2]), desc='read_fs_stats',
+                                 total=len(stats_files) / 2):
+        assert lh_file.split('/')[-3] == rh_file.split('/')[-3]  # same subject
+        try:
+            subject_id = lh_file.split('/')[-3]
+            lh_df = read_fs_stats_file(lh_file, atlas)
+            rh_df = read_fs_stats_file(rh_file, atlas)
+            if lh_df.empty or rh_df.empty:
+                failed_subjects.append(subject_id)
+            else:
+                res_dict[subject_id] = (lh_df, rh_df)
+        except:
+            failed_subjects.append(subject_id)
+    # assert len(failed_subjects) == 0
     return res_dict
 
 
@@ -77,7 +95,11 @@ def resample_temporal(time_series, time_window=30):
     length = time_series.shape[0]
     for start in range(0, length, time_window):
         end = start + time_window
-        end = length - 1 if end >= length else end
+        next_end = end + time_window
+        if next_end >= length:
+            end = length - 1
+            time_series_list.append(time_series[start:end])
+            break
         time_series_list.append(time_series[start:end])
     return time_series_list
 
@@ -252,18 +274,22 @@ def process_fs_output(fs_subject_dir, sh_script_path):
     num_workers = os.cpu_count()
     subject_chunks = chunks(subject_ids, num_workers)
 
-    # save subject list chunks to file
-    all_file_names = []
-    for i, chunk in enumerate(subject_chunks):
-        file_basename = 'subject_list_{}'.format(i)
-        file_path = osp.join(fs_subject_dir, file_basename)
-        with open(file_path, 'w') as f:
-            for item in chunk:
-                f.write("%s\n" % item)
-        all_file_names.append(file_basename)
+    # # save subject list chunks to file
+    # all_file_names = []
+    # for i, chunk in enumerate(subject_chunks):
+    #     file_basename = 'subject_list_{}'.format(i)
+    #     file_path = osp.join(fs_subject_dir, file_basename)
+    #     with open(file_path, 'w') as f:
+    #         for item in chunk:
+    #             f.write("%s\n" % item)
+    #     all_file_names.append(file_basename)
+    # with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
+    #     for item in all_file_names:
+    #         f.write("%s\n" % item)
     with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
-        for item in all_file_names:
-            f.write("%s\n" % item)
+        for item in subject_ids:
+            if item[-1].isdigit() and item[0].isalpha():
+                f.write("%s\n" % item)
 
     cp_cmd = 'cd {} && cp -r $SUBJECTS_DIR/fsaverage ./'.format(fs_subject_dir)
     # os.system(cp_cmd)
@@ -286,4 +312,5 @@ def process_fs_output(fs_subject_dir, sh_script_path):
 
 
 if __name__ == '__main__':
-    download_abide('new_datasets/ALL')
+    # download_abide('new_datasets/ALL')
+    process_fs_output('/data_57/huze/projects/IMEGAT/datasets/ALL/raw/Outputs/freesurfer/5.1', None)
