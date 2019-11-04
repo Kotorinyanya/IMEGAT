@@ -9,6 +9,8 @@ from torch_geometric.utils import to_scipy_sparse_matrix
 from torch.nn import BatchNorm1d
 from module import InstanceNorm
 
+EPS = 1e-15
+
 
 class Net(nn.Module):
 
@@ -108,11 +110,15 @@ class Net(nn.Module):
         assignment = self.split_n(assignment, batch.num_graphs)
         pool_assignment = (1 / self.beta_s) * assignment + \
                           (self.beta_s - 1 / self.beta_s) * self.pool_s
+        pool_assignment = torch.softmax(pool_assignment, dim=-1)
 
-        x_conv1_out = out_all[-1]
-        x_conv1_out = self.split_n(x_conv1_out, batch.num_graphs)
-        pooled_x, pooled_adj, link_loss, entropy_loss = dense_diff_pool(x_conv1_out, adj, pool_assignment)
-        reg = link_loss + entropy_loss
+        # modularity loss
+        modularity_loss = self.modularity_reg(pool_assignment.view(-1, self.pool_nodes), edge_index, edge_attr)
+        # entropy loss
+        entropy_loss = (-pool_assignment * torch.log(pool_assignment + EPS)).sum(dim=-1).mean()
+        pooled_x, pooled_adj = self.dense_diff_pool(self.split_n(out_all[-1], batch.num_graphs),
+                                                                        adj, pool_assignment)
+        reg = entropy_loss + modularity_loss
 
         # converting data
         data_list = []
@@ -156,6 +162,70 @@ class Net(nn.Module):
     @staticmethod
     def split_n(tensor, n):
         return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
+
+    @staticmethod
+    def modularity_reg(assignment, edge_index, edge_attr=None):
+        """
+        continues version of negative modularity (with positive value)
+        :return:
+        """
+        edge_attr = 1 if edge_attr is None else edge_attr
+        row, col = edge_index
+        reg = (edge_attr * torch.pow((assignment[row] - assignment[col]), 2).sum(1)).mean()
+        return reg
+
+    @staticmethod
+    def dense_diff_pool(x, adj, s, mask=None):
+        r"""Differentiable pooling operator from the `"Hierarchical Graph
+        Representation Learning with Differentiable Pooling"
+        <https://arxiv.org/abs/1806.08804>`_ paper
+
+        .. math::
+            \mathbf{X}^{\prime} &= {\mathrm{softmax}(\mathbf{S})}^{\top} \cdot
+            \mathbf{X}
+
+            \mathbf{A}^{\prime} &= {\mathrm{softmax}(\mathbf{S})}^{\top} \cdot
+            \mathbf{A} \cdot \mathrm{softmax}(\mathbf{S})
+
+        based on dense learned assignments :math:`\mathbf{S} \in \mathbb{R}^{B
+        \times N \times C}`.
+        Returns pooled node feature matrix, coarsened adjacency matrix and the
+        auxiliary link prediction objective :math:`\| \mathbf{A} -
+        \mathrm{softmax}(\mathbf{S}) \cdot {\mathrm{softmax}(\mathbf{S})}^{\top}
+        \|_F`.
+
+        Args:
+            x (Tensor): Node feature tensor :math:`\mathbf{X} \in \mathbb{R}^{B
+                \times N \times F}` with batch-size :math:`B`, (maximum)
+                number of nodes :math:`N` for each graph, and feature dimension
+                :math:`F`.
+            adj (Tensor): Adjacency tensor :math:`\mathbf{A} \in \mathbb{R}^{B
+                \times N \times N}`.
+            s (Tensor): Assignment tensor :math:`\mathbf{S} \in \mathbb{R}^{B
+                \times N \times C}` with number of clusters :math:`C`. The softmax
+                does not have to be applied beforehand, since it is executed
+                within this method.
+            mask (BoolTensor, optional): Mask matrix
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+                the valid nodes for each graph. (default: :obj:`None`)
+
+        :rtype: (:class:`Tensor`, :class:`Tensor`)
+        """
+
+        x = x.unsqueeze(0) if x.dim() == 2 else x
+        adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
+        s = s.unsqueeze(0) if s.dim() == 2 else s
+
+        batch_size, num_nodes, _ = x.size()
+
+        if mask is not None:
+            mask = mask.view(batch_size, num_nodes, 1).to(x.dtype)
+            x, s = x * mask, s * mask
+
+        out = torch.matmul(s.transpose(1, 2), x)
+        out_adj = torch.matmul(torch.matmul(s.transpose(1, 2), adj), s)
+
+        return out, out_adj
 
 
 class MLP(nn.Module):
