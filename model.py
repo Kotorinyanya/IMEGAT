@@ -17,7 +17,9 @@ class Net(nn.Module):
 
         self.in_channels = 11
         self.hidden_dim = 30
+        self.in_nodes = 360
         self.pool_nodes = 16
+        self.beta_s = 2
         self.block_chunk_size = 2
         self.first_layer_heads = 5
         self.first_layer_concat = False
@@ -48,6 +50,8 @@ class Net(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(50, self.pool_nodes)
         )
+        self.pool_s = nn.Parameter(torch.Tensor(self.in_nodes, self.pool_nodes))
+        self.pool_s.data = nn.init.xavier_uniform_(self.pool_s.data, gain=nn.init.calculate_gain('relu'))
 
         self.conv2 = nn.ModuleList([
             EGATConv(self.hidden_dim, self.hidden_dim),
@@ -101,11 +105,13 @@ class Net(nn.Module):
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
         assignment = self.pool_fc(pool_conv_out_all)
+        assignment = self.split_n(assignment, batch.num_graphs)
+        pool_assignment = (1 / self.beta_s) * assignment + \
+                          (self.beta_s - 1 / self.beta_s) * self.pool_s
 
         x_conv1_out = out_all[-1]
         x_conv1_out = self.split_n(x_conv1_out, batch.num_graphs)
-        assignment = self.split_n(assignment, batch.num_graphs)
-        pooled_x, pooled_adj, link_loss, entropy_loss = dense_diff_pool(x_conv1_out, adj, assignment)
+        pooled_x, pooled_adj, link_loss, entropy_loss = dense_diff_pool(x_conv1_out, adj, pool_assignment)
         reg = link_loss + entropy_loss
 
         # converting data

@@ -91,7 +91,7 @@ class EGATConv(torch.nn.Module):
         # Sum up neighborhoods.
         if self.concat:
             out = self.my_cast(alpha, x[col])
-            alpha = alpha.mean(-1).reshape(-1, 1)  # alpha is not concatenated any way, for edge_weight is 1D
+            alpha = alpha.mean(-1).reshape(-1, 1)  # alpha is not concatenated at return any way, for edge_weight is 1D
         else:
             alpha = alpha.mean(-1).reshape(-1, 1)
             out = self.my_cast(alpha, x[col])
