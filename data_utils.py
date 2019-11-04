@@ -108,11 +108,14 @@ def fetch_url(proxies, out_dir, s3_prefix, s3_path):
             pass
     if not os.path.exists(download_file):
         print('Retrieving: {0}'.format(download_file))
-        r = requests.get(s3_path, stream=True, proxies=proxies)
-        if r.status_code == 200:
-            with open(download_file, 'wb') as f:
-                for chunk in r:
-                    f.write(chunk)
+        try:
+            r = requests.get(s3_path, stream=True, proxies=proxies)
+            if r.status_code == 200:
+                with open(download_file, 'wb') as f:
+                    for chunk in r:
+                        f.write(chunk)
+        except:  # time out
+            pass
     return download_file
 
 
