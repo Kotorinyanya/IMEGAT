@@ -112,7 +112,7 @@ class EGATConv(torch.nn.Module):
 
         assert not nan_or_inf(out)
 
-        return out, alpha, edge_index, edge_attr
+        return out, alpha, edge_index
 
     @staticmethod
     def my_cast(alpha, x):

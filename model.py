@@ -2,7 +2,8 @@ from torch_geometric.data import Batch, Data
 from torch_geometric.nn import dense_diff_pool
 
 # from torch_geometric.nn import GCNConv
-from module import EGATConv
+from module import EGATConv, GraphConv
+from torch_geometric.nn import GCNConv
 from utils import *
 from torch import nn
 from torch_geometric.utils import to_scipy_sparse_matrix
@@ -20,49 +21,50 @@ class Net(nn.Module):
         self.in_channels = 11
         self.hidden_dim = 30
         self.in_nodes = 360
-        self.pool_nodes = 16
+        self.pool1_percent = 0.1
+        self.pool1_nodes = int(self.in_nodes * self.pool1_percent)
         self.beta_s = 2
         self.block_chunk_size = 2
         self.first_layer_heads = 5
-        self.first_layer_concat = True
+        self.first_layer_concat = False
         self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
             if self.first_layer_concat else self.hidden_dim
 
         self.conv1 = nn.ModuleList([
             EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
             InstanceNorm(self.first_conv_out_size),
-            EGATConv(self.first_conv_out_size, self.hidden_dim),
+            GraphConv(self.first_conv_out_size, self.hidden_dim),
             InstanceNorm(self.hidden_dim),
-            # EGATConv(self.hidden_dim, self.hidden_dim),
-            # InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
         ])
 
-        self.pool_conv = nn.ModuleList([
-            EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
-            InstanceNorm(self.first_conv_out_size),
-            # EGATConv(self.hidden_dim, self.hidden_dim),
-            # InstanceNorm(self.hidden_dim),
-            EGATConv(self.first_conv_out_size, self.pool_nodes),
-            InstanceNorm(self.pool_nodes),
+        self.pool1_conv = nn.ModuleList([
+            GraphConv(self.in_channels, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.first_conv_out_size, self.pool1_nodes),
+            InstanceNorm(self.pool1_nodes),
         ])
         self.pool_fc = nn.Sequential(
-            nn.Linear(self.first_conv_out_size + self.pool_nodes, 50),
-            nn.Linear(50, self.pool_nodes)
+            nn.Linear(self.hidden_dim + self.hidden_dim + self.pool1_nodes, 50),
+            nn.Linear(50, self.pool1_nodes)
         )
         # self.pool_s2 = StablePool(self.in_nodes, self.pool_nodes, self.beta_s)
 
         self.conv2 = nn.ModuleList([
-            EGATConv(self.hidden_dim, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
-            InstanceNorm(self.first_conv_out_size),
-            EGATConv(self.first_conv_out_size, self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
             InstanceNorm(self.hidden_dim),
-            # EGATConv(self.hidden_dim, self.hidden_dim),
-            # InstanceNorm(self.hidden_dim),
+            GraphConv(self.first_conv_out_size, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
         ])
 
         self.fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(self.first_conv_out_size * 2 + self.hidden_dim * 2, 50),
+            nn.Linear(self.first_conv_out_size * 1 + self.hidden_dim * 5, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -85,19 +87,25 @@ class Net(nn.Module):
         # alpha_reg_all = []
 
         # conv1
-        a, ei = edge_attr, edge_index
+        ea, ei = edge_attr, edge_index
         for conv_block, norm_block in chunks(self.conv1, self.block_chunk_size):
-            x, a, ei, ea = conv_block(x, ei, a)
+            if conv_block.__class__ == EGATConv:
+                x, ea, ei = conv_block(x, ei, ea)
+            else:  # GraphConv etc.
+                x = conv_block(x, ei, ea.view(-1))
             x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
 
         # soft pooling
         pool_conv_out_all = []
-        a, ei = edge_attr, edge_index
+        ea, ei = edge_attr, edge_index
         x = batch.x.to(self.device)  # orig x
-        for conv_block, norm_block in chunks(self.pool_conv, self.block_chunk_size):
-            x, a, ei, ea = conv_block(x, ei, a)
+        for conv_block, norm_block in chunks(self.pool1_conv, self.block_chunk_size):
+            if conv_block.__class__ == EGATConv:
+                x, ea, ei = conv_block(x, ei, ea)
+            else:  # GraphConv etc.
+                x = conv_block(x, ei, ea.view(-1))
             x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
@@ -122,7 +130,7 @@ class Net(nn.Module):
             tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
             # tmp_adj[tmp_adj == 0] = 1e-16  # fully connected
             edge_index, edge_attr = from_2d_tensor_adj(tmp_adj.clone())
-            data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes))
+            data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool1_nodes))
         p1_batch = Batch.from_data_list(data_list)
         edge_index, edge_attr = p1_batch.edge_index, p1_batch.edge_attr
         p1_batch_mask = p1_batch.batch.to(self.device)
@@ -130,10 +138,13 @@ class Net(nn.Module):
         pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
         # conv2
-        a, ei = edge_attr, edge_index
+        ea, ei = edge_attr, edge_index
         x = pooled_x
         for conv_block, norm_block in chunks(self.conv2, self.block_chunk_size):
-            x, a, ei, ea = conv_block(x, ei, a)
+            if conv_block.__class__ == EGATConv:
+                x, ea, ei = conv_block(x, ei, ea)
+            else:  # GraphConv etc.
+                x = conv_block(x, ei, ea.view(-1))
             x = norm_block(x, p1_batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
@@ -181,6 +192,91 @@ class Net(nn.Module):
         out_adj = torch.matmul(torch.matmul(s.transpose(1, 2), adj), s)
 
         return out, out_adj
+
+
+class ResGCN(nn.Module):
+    def __init__(self, writer=None, dropout=0.0):
+        super(ResGCN, self).__init__()
+
+        self.in_channels = 11
+        self.hidden_dim = 30
+        self.in_nodes = 360
+        self.block_chunk_size = 2
+        self.first_layer_heads = 5
+        self.first_layer_concat = False
+        self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
+            if self.first_layer_concat else self.hidden_dim
+
+        self.convs = nn.ModuleList([
+            EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
+            InstanceNorm(self.first_conv_out_size),
+            GraphConv(self.first_conv_out_size, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            GraphConv(self.hidden_dim, self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+        ])
+
+        self.fc = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(self.first_conv_out_size * 1 + self.hidden_dim * 9, 50),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(50, 2)
+        )
+
+    def forward(self, batch):
+        if type(batch) == list:  # Data list
+            batch = Batch.from_data_list(batch)
+
+        x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
+        edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
+        batch_mask = batch.batch.to(self.device)
+
+        out_all = []
+
+        # convs
+        ea, ei = edge_attr, edge_index
+        for conv_block, norm_block in chunks(self.convs, self.block_chunk_size):
+            if conv_block.__class__ == EGATConv:
+                x, ea, ei = conv_block(x, ei, ea)
+            else:  # GraphConv etc.
+                x = conv_block(x, ei, ea.view(-1))
+            x = norm_block(x, batch_mask)
+            # alpha_reg_all.append(entropy(a, ei).mean())
+            out_all.append(x)
+
+        # global pooling
+        global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
+        # global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
+        global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
+
+        fc_out = self.fc(global_pooled_out_all)
+
+        reg = torch.tensor([0.], device=self.device)
+
+        return fc_out, reg
+
+    @staticmethod
+    def split_n(tensor, n):
+        return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
+
+    @property
+    def device(self):
+        return self.convs[0].weight.device
 
 
 class MLP(nn.Module):
