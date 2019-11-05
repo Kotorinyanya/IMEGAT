@@ -33,39 +33,36 @@ class Net(nn.Module):
             InstanceNorm(self.first_conv_out_size),
             EGATConv(self.first_conv_out_size, self.hidden_dim),
             InstanceNorm(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
+            # EGATConv(self.hidden_dim, self.hidden_dim),
+            # InstanceNorm(self.hidden_dim),
         ])
 
         self.pool_conv = nn.ModuleList([
             EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
             InstanceNorm(self.first_conv_out_size),
-            EGATConv(self.first_conv_out_size, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.pool_nodes),
+            # EGATConv(self.hidden_dim, self.hidden_dim),
+            # InstanceNorm(self.hidden_dim),
+            EGATConv(self.first_conv_out_size, self.pool_nodes),
             InstanceNorm(self.pool_nodes),
         ])
         self.pool_fc = nn.Sequential(
-            nn.Linear(self.first_conv_out_size + self.hidden_dim + self.pool_nodes, 50),
-            InstanceNorm(50),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Linear(self.first_conv_out_size + self.pool_nodes, 50),
             nn.Linear(50, self.pool_nodes)
         )
-        self.pool_s2 = StablePool(self.in_nodes, self.pool_nodes, self.beta_s)
+        # self.pool_s2 = StablePool(self.in_nodes, self.pool_nodes, self.beta_s)
 
         self.conv2 = nn.ModuleList([
-            EGATConv(self.hidden_dim, self.hidden_dim),
+            EGATConv(self.hidden_dim, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
+            InstanceNorm(self.first_conv_out_size),
+            EGATConv(self.first_conv_out_size, self.hidden_dim),
             InstanceNorm(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            EGATConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
+            # EGATConv(self.hidden_dim, self.hidden_dim),
+            # InstanceNorm(self.hidden_dim),
         ])
 
         self.fc = nn.Sequential(
-            nn.Linear(self.first_conv_out_size * 1 + self.hidden_dim * 5, 50),
-            InstanceNorm(50),
+            nn.Dropout(dropout),
+            nn.Linear(self.first_conv_out_size * 2 + self.hidden_dim * 2, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -91,6 +88,8 @@ class Net(nn.Module):
         a, ei = edge_attr, edge_index
         for conv_block, norm_block in chunks(self.conv1, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
+            print('conv1')
+            print(a.min())
             x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
@@ -102,27 +101,29 @@ class Net(nn.Module):
         for conv_block, norm_block in chunks(self.pool_conv, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
             x = norm_block(x, batch_mask)
+            print('pconv1')
+            print(a.min())
             # alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
         assignment = self.pool_fc(pool_conv_out_all)
         pool_assignment = self.split_n(assignment, batch.num_graphs)
-        pool_assignment = self.pool_s2(pool_assignment)
+        # pool_assignment = self.pool_s2(pool_assignment)
         pool_assignment = torch.softmax(pool_assignment, dim=-1)
 
         # modularity loss
-        modularity_loss = self.modularity_reg(pool_assignment.view(-1, self.pool_nodes), edge_index, edge_attr)
+        # modularity_loss = self.modularity_reg(pool_assignment.view(-1, self.pool_nodes), edge_index, edge_attr)
         # entropy loss
         entropy_loss = (-pool_assignment * torch.log(pool_assignment + EPS)).sum(dim=-1).mean()
         pooled_x, pooled_adj = self.dense_diff_pool(self.split_n(out_all[-1], batch.num_graphs),
                                                     adj, pool_assignment)
-        reg = entropy_loss + modularity_loss
+        reg = entropy_loss
 
         # converting data
         data_list = []
         for i in range(batch.num_graphs):
             tmp_adj = pooled_adj[i]
-            # tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
+            tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
             # tmp_adj[tmp_adj == 0] = 1e-16  # fully connected
             edge_index, edge_attr = from_2d_tensor_adj(tmp_adj.clone())
             data_list.append(Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes))
@@ -130,13 +131,15 @@ class Net(nn.Module):
         edge_index, edge_attr = p1_batch.edge_index, p1_batch.edge_attr
         p1_batch_mask = p1_batch.batch.to(self.device)
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
-        # pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
+        pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
         # conv2
         a, ei = edge_attr, edge_index
         x = pooled_x
         for conv_block, norm_block in chunks(self.conv2, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
+            print('conv2')
+            print(a.min())
             x = norm_block(x, p1_batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)

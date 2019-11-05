@@ -305,4 +305,4 @@ if __name__ == "__main__":
     model = Net
     train_cross_validation(model, dataset, comment='test_net', batch_size=5, patience=200,
                            num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0,
-                           use_gpu=True, dp=False, ddp=False, device_ids=[4, 5, 6, 7], cuda_device=5)
+                           use_gpu=True, dp=False, ddp=False, device_ids=[4, 5, 6, 7], cuda_device=4)
