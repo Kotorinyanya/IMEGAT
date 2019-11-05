@@ -88,8 +88,6 @@ class Net(nn.Module):
         a, ei = edge_attr, edge_index
         for conv_block, norm_block in chunks(self.conv1, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            print('conv1')
-            print(a.min())
             x = norm_block(x, batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
@@ -101,8 +99,6 @@ class Net(nn.Module):
         for conv_block, norm_block in chunks(self.pool_conv, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
             x = norm_block(x, batch_mask)
-            print('pconv1')
-            print(a.min())
             # alpha_reg_all.append(entropy(a, ei).mean())
             pool_conv_out_all.append(x)
         pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
@@ -138,8 +134,6 @@ class Net(nn.Module):
         x = pooled_x
         for conv_block, norm_block in chunks(self.conv2, self.block_chunk_size):
             x, a, ei, ea = conv_block(x, ei, a)
-            print('conv2')
-            print(a.min())
             x = norm_block(x, p1_batch_mask)
             # alpha_reg_all.append(entropy(a, ei).mean())
             out_all.append(x)
