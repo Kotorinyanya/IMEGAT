@@ -16,6 +16,8 @@ from utils import get_model_log_dir, to_cuda
 import time
 import numpy as np
 
+from warmup_scheduler import GradualWarmupScheduler
+
 from livelossplot import PlotLosses
 
 
@@ -140,6 +142,9 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999),
                                      eps=1e-08, weight_decay=weight_decay, amsgrad=False)
+        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
+        scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=8, total_epoch=10,
+                                                  after_scheduler=scheduler_cosine)
         # optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
         if ddp:
             model = nn.parallel.DistributedDataParallel(model.to(device_ids[0]), device_ids=device_ids)
@@ -209,9 +214,9 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     epoch_label = torch.cat([epoch_label, label.detach().float().view(-1).cpu()])
                     epoch_predicted = torch.cat([epoch_predicted, predicted.detach().float().view(-1).cpu()])
 
-                precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted, average='micro')
-                recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted, average='micro')
-                f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted, average='micro')
+                # precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted, average='micro')
+                # recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted, average='micro')
+                # f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted, average='micro')
                 accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
                 epoch_total_loss = running_total_loss / dataloader.__len__()
                 epoch_nll_loss = running_nll_loss / dataloader.__len__()
@@ -224,14 +229,14 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                 writer.add_scalars('accuracy',
                                    {'{}_accuracy'.format(phase): accuracy},
                                    epoch)
-                writer.add_scalars('{}_APRF'.format(phase),
-                                   {
-                                       'accuracy': accuracy,
-                                       'precision': precision,
-                                       'recall': recall,
-                                       'f1_score': f1_score
-                                   },
-                                   epoch)
+                # writer.add_scalars('{}_APRF'.format(phase),
+                #                    {
+                #                        'accuracy': accuracy,
+                #                        'precision': precision,
+                #                        'recall': recall,
+                #                        'f1_score': f1_score
+                #                    },
+                #                    epoch)
                 if epoch_reg_loss != 0:
                     writer.add_scalars('reg_loss'.format(phase),
                                        {'{}_reg_loss'.format(phase): epoch_reg_loss},
@@ -289,9 +294,9 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
                     logs[prefix + 'log loss'] = epoch_nll_loss
                     logs[prefix + 'accuracy'] = accuracy
-
-                    liveloss.update(logs)
-                    liveloss.draw()
+            if live_loss:
+                liveloss.update(logs)
+                liveloss.draw()
 
     print("Done !")
 

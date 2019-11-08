@@ -183,5 +183,32 @@ def from_2d_tensor_adj(adj):
     return edge_index, edge_weight
 
 
+def my_to_data_list(batch, num_nodes):
+    r"""Reconstructs the list of :class:`torch_geometric.data.Data` objects
+    from the batch object.
+    The batch object must have been created via :meth:`from_data_list` in
+    order to be able reconstruct the initial objects."""
+
+    if batch.__slices__ is None:
+        raise RuntimeError(
+            ('Cannot reconstruct data list from batch because the batch '
+             'object was not created using Batch.from_data_list()'))
+
+    keys = [key for key in batch.keys if key[-5:] != 'batch']
+    cumsum = {key: 0 for key in keys}
+    data_list = []
+    for i in range(len(batch.__slices__[keys[0]]) - 1):
+        data = batch.__data_class__()
+        for key in keys:
+            data[key] = batch[key].narrow(
+                data.__cat_dim__(key, batch[key]), batch.__slices__[key][i],
+                batch.__slices__[key][i + 1] - batch.__slices__[key][i])
+            data[key] = data[key] - cumsum[key]
+            cumsum[key] += num_nodes
+        data_list.append(data)
+
+    return data_list
+
+
 def nan_or_inf(x):
     return torch.isnan(x).any() or x.eq(float('inf')).any() or x.eq(float('-inf')).any()

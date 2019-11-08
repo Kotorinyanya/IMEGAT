@@ -111,7 +111,6 @@ class EGATConv(torch.nn.Module):
             out = out + self.bias
 
         assert not nan_or_inf(out)
-
         return out, alpha, edge_index
 
     @staticmethod
