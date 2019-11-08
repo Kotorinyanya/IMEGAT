@@ -1,5 +1,5 @@
 from torch_geometric.data import Batch, Data
-from torch_geometric.nn import dense_diff_pool
+from torch_geometric.nn import dense_diff_pool, GATConv
 
 # from torch_geometric.nn import GCNConv
 from module import EGATConv

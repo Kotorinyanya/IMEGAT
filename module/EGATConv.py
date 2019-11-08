@@ -49,7 +49,7 @@ class EGATConv(torch.nn.Module):
 
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
-        self.att_weight = Parameter(torch.Tensor(2 * in_channels, self.heads))
+        self.att_weight = Parameter(torch.Tensor(2 * out_channels, self.heads))
         if self.heads > 1:
             self.att_concat_weight = Parameter(torch.Tensor(self.heads, 1))
         else:
@@ -77,7 +77,10 @@ class EGATConv(torch.nn.Module):
     def forward(self, x, edge_index, edge_attr):
 
         edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+        edge_index, edge_attr = add_self_loops_mul(edge_index, edge_attr)
         row, col = edge_index
+
+        x = x @ self.weight
 
         # Compute attention coefficients
         alpha = torch.cat([x[row], x[col]], dim=-1)
@@ -87,12 +90,7 @@ class EGATConv(torch.nn.Module):
         alpha = F.leaky_relu(alpha, negative_slope=10)
         alpha = softmax(alpha, row)
         # Dropout attentions
-        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout)
-
-        x = x @ self.weight
-
-        edge_index, alpha = add_self_loops_mul(edge_index, alpha)
-        row, col = edge_index
+        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
 
         # Sum up neighborhoods.
         att_concat_weight = torch.softmax(self.att_concat_weight, dim=0) if self.heads > 1 \
