@@ -51,9 +51,9 @@ class EGATConv(torch.nn.Module):
             torch.Tensor(in_channels, out_channels))
         self.att_weight = Parameter(torch.Tensor(2 * out_channels, self.heads))
         if self.heads > 1:
-            self.att_concat_weight = Parameter(torch.Tensor(self.heads, 1))
+            self.att_conv_weight = Parameter(torch.Tensor(self.heads, 1))
         else:
-            self.register_parameter('att_concat_weight', None)
+            self.register_parameter('att_conv_weight', None)
 
         self.att_drop = nn.Dropout(att_dropout)
 
@@ -70,7 +70,7 @@ class EGATConv(torch.nn.Module):
         self.weight.data = nn.init.xavier_uniform_(self.weight.data, gain=nn.init.calculate_gain('relu'))
         self.att_weight.data = nn.init.xavier_uniform_(self.att_weight.data, gain=nn.init.calculate_gain('relu'))
         if self.heads > 1:
-            self.att_concat_weight.data.fill_(1 / self.heads)
+            self.att_conv_weight.data.fill_(1 / self.heads)
         # uniform(self.att_weight)
         zeros(self.bias)
 
@@ -93,7 +93,7 @@ class EGATConv(torch.nn.Module):
         edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
 
         # Sum up neighborhoods.
-        att_concat_weight = torch.softmax(self.att_concat_weight, dim=0) if self.heads > 1 \
+        att_concat_weight = torch.softmax(self.att_conv_weight, dim=0) if self.heads > 1 \
             else torch.tensor([[1.]], device=self.device)
         if self.concat:
             out = self.my_cast(alpha, x[col])
@@ -109,8 +109,7 @@ class EGATConv(torch.nn.Module):
             out = out + self.bias
 
         assert not nan_or_inf(out)
-
-        return out, alpha, edge_index, edge_attr
+        return out, alpha, edge_index
 
     @staticmethod
     def my_cast(alpha, x):
