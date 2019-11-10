@@ -10,6 +10,7 @@ from torch_geometric.utils import to_scipy_sparse_matrix
 from torch.nn import BatchNorm1d
 from module import InstanceNorm, StablePool
 from functools import partial
+import torch.nn.functional as F
 
 EPS = 1e-15
 
@@ -49,13 +50,15 @@ class ResConvBlock(nn.Module):
 
         if self.block_chunk_size == 2:  # with batch norm
             for i, (conv_block, norm_block) in enumerate(chunks(self.res_convs, self.block_chunk_size)):
+                # print(i, "ea", ea[:10].view(-1))
                 if i >= 1:  # add res block
                     x = torch.cat([out_all[-1], x], dim=-1)
                 if conv_block.__class__ == EGATConv:  # EGATConv
-                    x, ea, ei = conv_block(x, ei, ea)
+                    x, ea, ei = conv_block(x, ei, ea.view(-1, 1))
                 else:  # GraphConv or etc.
                     x = conv_block(x, ei, ea.view(-1))
-                # print(i, x[:5, :5])
+                x = F.leaky_relu(x, negative_slope=0.1)
+                # print(i, "x", x[:5, :5])
                 x = norm_block(x, batch_mask)
                 out_all.append(x)
 
@@ -71,7 +74,7 @@ class Pool(nn.Module):
         super(Pool, self).__init__()
         self.block_chunk_size = 2
         self.pool_nodes = pool_nodes
-        self.detach_pool = False  # detach to train separately
+        self.detach_pool = True  # detach adj
         self.conv_depth = depth
         self.pool_convs = ResConvBlock(in_channels, hiddem_dim, pool_nodes, self.conv_depth,
                                        first_conv_layer=GraphConv,
@@ -106,7 +109,7 @@ class Pool(nn.Module):
         entropy_loss = self.entropy_loss(pool_assignment)
         link_loss = self.link_loss(pool_assignment, adj)
         # perform pooling
-        pool_assignment = pool_assignment.detach() if self.detach_pool else pool_assignment
+        # pool_assignment = pool_assignment.detach() if self.detach_pool else pool_assignment
         pooled_x = pool_assignment.transpose(1, 2) @ self.split_n(x_to_pool, num_graphs)
         pooled_adj = pool_assignment.transpose(1, 2) @ adj @ pool_assignment
 
@@ -160,32 +163,34 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.in_channels = 11
-        self.hidden_dim = 30
+        self.hidden_dim = 10
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 16
-        # self.pool2_nodes = 16
+        self.pool1_nodes = 90
+        self.pool2_nodes = 22
         self.beta_s = 2
-        self.first_layer_heads = 1
-        self.depth = 12
+        self.first_layer_heads = 5
+        self.depth = 3
+        self.pool_depth = 3
         self.first_layer_concat = False  # TODO: `True` is not implemented in ResConvBlock
         self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
             if self.first_layer_concat else self.hidden_dim
 
-        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat)
+        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat,
+                               att_dropout=0)
 
         self.conv1 = ResConvBlock(self.in_channels, self.hidden_dim, self.hidden_dim, self.depth,
                                   first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
-        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, 4)
+        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth)
         self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
                                   first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
-        # self.pool2 = Pool(self.hidden_dim * self.depth, self.hidden_dim, self.pool2_nodes, self.depth)
-        # self.conv3 = ResConvBlock(self.hidden_dim * self.depth, self.hidden_dim, self.hidden_dim, self.depth,
-        #                           first_conv_layer=egat)
+        self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
+        self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
+                                  first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
 
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(self.first_conv_out_size * 2 + self.hidden_dim * (self.depth - 1) * 2, 50),
+            nn.Linear((self.first_conv_out_size + self.hidden_dim * (self.depth - 1)) * 3, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -203,11 +208,10 @@ class Net(nn.Module):
         out_all.append(self.conv1(x, edge_index, edge_attr, batch.batch.to(self.device)))
         p1_x, p1_ei, p1_ea, p1_batch, p1_el, p1_ml, p1_ll = self.pool1(x, edge_index, edge_attr, batch,
                                                                        out_all[-1][-1])
-        # torch.cat(out_all[-1], dim=-1))
         out_all.append(self.conv2(p1_x, p1_ei, p1_ea, p1_batch.batch.to(self.device)))
-        # p2_x, p2_ei, p2_ea, p2_batch, p2_el, p2_ml = self.pool2(p1_x, p1_ei, p1_ea, p1_batch,
-        #                                                         torch.cat(out_all[-1], dim=-1))
-        # out_all.append(self.conv3(p2_x, p2_ei, p2_ea, p2_batch.batch.to(self.device)))
+        p2_x, p2_ei, p2_ea, p2_batch, p2_el, p2_ml, p2_ll = self.pool2(p1_x, p1_ei, p1_ea, p1_batch,
+                                                                       out_all[-1][-1])
+        out_all.append(self.conv3(p2_x, p2_ei, p2_ea, p2_batch.batch.to(self.device)))
 
         out_all = sum(out_all, [])  # !!!?
 
@@ -216,7 +220,8 @@ class Net(nn.Module):
         # global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
         global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
 
-        reg = p1_el + p1_ml
+        reg = p1_ml
+        # reg = torch.tensor([0.], device=self.device)
         reg = reg.unsqueeze(0)
 
         fc_out = self.final_fc(global_pooled_out_all)
@@ -239,38 +244,21 @@ class ResGCN(nn.Module):
         self.in_channels = 11
         self.hidden_dim = 30
         self.in_nodes = 360
-        self.block_chunk_size = 2
         self.first_layer_heads = 5
         self.first_layer_concat = False
+        self.depth = 6
         self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
             if self.first_layer_concat else self.hidden_dim
 
-        self.convs = nn.ModuleList([
-            EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads, concat=self.first_layer_concat),
-            InstanceNorm(self.first_conv_out_size),
-            GraphConv(self.first_conv_out_size, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            GraphConv(self.hidden_dim, self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-        ])
+        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat,
+                               att_dropout=dropout)
 
-        self.fc = nn.Sequential(
+        self.convs = ResConvBlock(self.in_channels, self.hidden_dim, self.hidden_dim, self.depth,
+                                  first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
+
+        self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(self.first_conv_out_size * 1 + self.hidden_dim * 9, 50),
+            nn.Linear((self.first_conv_out_size + self.hidden_dim * (self.depth - 1)) * 1, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -282,29 +270,19 @@ class ResGCN(nn.Module):
 
         x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
-        batch_mask = batch.batch.to(self.device)
 
-        out_all = []
-
-        # convs
-        ea, ei = edge_attr, edge_index
-        for conv_block, norm_block in chunks(self.convs, self.block_chunk_size):
-            if conv_block.__class__ == EGATConv:
-                x, ea, ei = conv_block(x, ei, ea)
-            else:  # GraphConv etc.
-                x = conv_block(x, ei, ea.view(-1))
-            x = norm_block(x, batch_mask)
-            # alpha_reg_all.append(entropy(a, ei).mean())
-            out_all.append(x)
+        out_all = self.convs(x, edge_index, edge_attr, batch.batch.to(self.device))
 
         # global pooling
         global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
         # global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
         global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
 
-        fc_out = self.fc(global_pooled_out_all)
-
+        # reg = p1_el + p1_ml
         reg = torch.tensor([0.], device=self.device)
+        reg = reg.unsqueeze(0)
+
+        fc_out = self.final_fc(global_pooled_out_all)
 
         return fc_out, reg
 
@@ -314,7 +292,7 @@ class ResGCN(nn.Module):
 
     @property
     def device(self):
-        return self.convs[0].weight.device
+        return self.convs.device
 
 
 class MLP(nn.Module):

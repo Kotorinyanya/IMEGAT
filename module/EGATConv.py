@@ -50,10 +50,10 @@ class EGATConv(torch.nn.Module):
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
         self.att_weight = Parameter(torch.Tensor(2 * out_channels, self.heads))
-        if self.heads > 1:
-            self.att_conv_weight = Parameter(torch.Tensor(self.heads, 1))
-        else:
-            self.register_parameter('att_conv_weight', None)
+        # if self.heads > 1:
+        #     self.att_conv_weight = Parameter(torch.Tensor(self.heads, 1))
+        # else:
+        #     self.register_parameter('att_conv_weight', None)
 
         self.att_drop = nn.Dropout(att_dropout)
 
@@ -69,8 +69,8 @@ class EGATConv(torch.nn.Module):
         # glorot(self.weight)
         self.weight.data = nn.init.xavier_uniform_(self.weight.data, gain=nn.init.calculate_gain('relu'))
         self.att_weight.data = nn.init.xavier_uniform_(self.att_weight.data, gain=nn.init.calculate_gain('relu'))
-        if self.heads > 1:
-            self.att_conv_weight.data.fill_(1 / self.heads)
+        # if self.heads > 1:
+        #     self.att_conv_weight.data.fill_(1 / self.heads)
         # uniform(self.att_weight)
         zeros(self.bias)
 
@@ -91,17 +91,18 @@ class EGATConv(torch.nn.Module):
         alpha = softmax(alpha, row)
         # Dropout attentions
         edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
+        row, col = edge_index
 
         # Sum up neighborhoods.
-        att_concat_weight = torch.softmax(self.att_conv_weight, dim=0) if self.heads > 1 \
-            else torch.tensor([[1.]], device=self.device)
+        # att_concat_weight = torch.softmax(self.att_conv_weight, dim=0) if self.heads > 1 \
+        #     else torch.tensor([[1.]], device=self.device)
         if self.concat:
             out = self.my_cast(alpha, x[col])
             # alpha is not concatenated at return any way, for edge_weight is 1D
-            alpha = alpha @ att_concat_weight
-            # alpha = alpha.mean(-1).reshape(-1, 1)
+            # alpha = alpha @ att_concat_weight
+            alpha = alpha.mean(-1).reshape(-1, 1)
         else:
-            alpha = alpha @ att_concat_weight
+            alpha = alpha.mean(-1).reshape(-1, 1)
             out = self.my_cast(alpha, x[col])
         out = scatter_add(out, row, dim=0, dim_size=x.size(0))
 

@@ -24,7 +24,8 @@ from utils import z_score_norm_data, positive_transform
 
 from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
-from nilearn.plotting import plot_connectome
+
+from nilearn.plotting import plot_matrix
 
 
 class ABIDE(InMemoryDataset):
@@ -283,7 +284,8 @@ class ABIDE(InMemoryDataset):
                         additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
                         new_node_features = torch.cat([anatomical_features, additional_feature], dim=-1)
                     # positive transform (to distance)
-                    adj = 1 - np.sqrt((1 - adj) / 2) if self.transform_edge else adj
+                    # adj = 1 - np.sqrt((1 - adj) / 2) if self.transform_edge else adj
+                    adj = np.abs(adj)
                     # set a threshold for adj
                     if self.threshold is not None:
                         adj = top_k_percent_adj(adj, self.threshold)
@@ -303,8 +305,8 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/ALL', transform=z_score_norm_data,
-                  resample_ts=False, transform_edge=True,
+    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
+                  resample_ts=True, transform_edge=True,
                   use_edge_weight_as_node_feature=True,
                   threshold=None,
                   atlas='HCPMMP1')

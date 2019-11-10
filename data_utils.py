@@ -90,13 +90,13 @@ def extract_time_series(nii_file, atlas_nii_file=None):
     return time_series
 
 
-def resample_temporal(time_series, time_window=30):
+def resample_temporal(time_series, time_window=90):
     time_series_list = []
     length = time_series.shape[0]
     for start in range(0, length, time_window):
         end = start + time_window
-        next_end = end + time_window
-        if next_end >= length:
+        # next_end = end + time_window
+        if end >= length:
             end = length - 1
             time_series_list.append(time_series[start:end])
             break

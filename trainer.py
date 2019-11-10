@@ -27,9 +27,10 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            comment='', tb_service_loc='192.168.192.58:6007', batch_size=1,
                            num_workers=0, pin_memory=False, cuda_device=None,
                            ddp_port='23456', fold_no=None, saved_model_path=None,
-                           device_ids=None, patience=20, seed=None, save_model=False,
-                           is_reg=True, live_loss=True):
+                           device_ids=None, patience=20, seed=None, fold_seed=None,
+                           save_model=False, is_reg=True, live_loss=True):
     """
+    :type fold_seed: int
     :param live_loss: bool
     :param is_reg: bool
     :param save_model: bool
@@ -97,7 +98,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
-    folds, fold = GroupShuffleSplit(n_splits=n_splits, random_state=seed), 0
+    folds, fold = GroupShuffleSplit(n_splits=n_splits, random_state=fold_seed if fold_seed is not None else seed), 0
     print(dataset.__len__())
 
     for train_idx, test_idx in tqdm_notebook(folds.split(list(range(dataset.__len__())),
@@ -140,8 +141,8 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
             writer.add_text('model_summary', model.__repr__())
             writer.add_text('training_args', str(saved_args))
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999),
-                                     eps=1e-08, weight_decay=weight_decay, amsgrad=False)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.999),
+                                      eps=1e-08, weight_decay=weight_decay, amsgrad=False)
         scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
         scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=8, total_epoch=10,
                                                   after_scheduler=scheduler_cosine)
@@ -307,7 +308,8 @@ if __name__ == "__main__":
     from model import Net
 
     dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net', batch_size=5, patience=200,
+    train_cross_validation(model, dataset, comment='test_net', batch_size=10, patience=200,
                            num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0,
-                           use_gpu=True, dp=False, ddp=False, device_ids=[4, 5, 6, 7], cuda_device=4)
+                           use_gpu=True, dp=False, ddp=False, device_ids=[0], cuda_device=0, fold_seed=1234)
