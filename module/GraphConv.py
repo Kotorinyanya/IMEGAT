@@ -39,7 +39,7 @@ class GraphConv(MessagePassing):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 type=3,
+                 type=1,
                  improved=False,
                  cached=False,
                  bias=True,

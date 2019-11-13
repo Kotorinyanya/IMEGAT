@@ -72,6 +72,11 @@ def z_score_norm_data(data):
     return data
 
 
+def new_ones(data):
+    data.x = torch.ones_like(data.x)
+    return data
+
+
 def gaussian_fit(data):
     data.x = data.x.normal_(mean=0, std=1)
     return data

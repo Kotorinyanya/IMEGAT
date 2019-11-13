@@ -120,9 +120,6 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         model = model_cls(writer, dropout=dropout)
 
-        if use_gpu:
-            torch.cuda.manual_seed_all(1)
-
         train_dataloader = DataLoader(dataset.__indexing__(train_idx),
                                       shuffle=True,
                                       batch_size=batch_size,
@@ -305,11 +302,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 if __name__ == "__main__":
     from utils import z_score_norm_data
     from dataset import ABIDE
-    from model import Net
+    from model import CPNet
 
     dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
     dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
-    model = Net
+    model = CPNet
     train_cross_validation(model, dataset, comment='test_net', batch_size=10, patience=200,
                            num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0,
                            use_gpu=True, dp=False, ddp=False, device_ids=[0], cuda_device=0, fold_seed=1234)
