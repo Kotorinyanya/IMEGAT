@@ -300,7 +300,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 
 if __name__ == "__main__":
-    from utils import z_score_norm_data
+    from utils import z_score_norm_data, new_ones
     from dataset import ABIDE
     from model import CPNet
 

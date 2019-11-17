@@ -163,7 +163,7 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.in_channels = 11
-        self.hidden_dim = 30
+        self.hidden_dim = 10
         self.in_nodes = 360
         # self.pool_percent = 0.25
         self.pool1_nodes = 90

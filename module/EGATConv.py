@@ -87,7 +87,7 @@ class EGATConv(torch.nn.Module):
         alpha = alpha @ self.att_weight
         # This will broadcast edge_attr across all attentions
         alpha = alpha * edge_attr.abs().reshape(-1, 1)
-        alpha = F.leaky_relu(alpha, negative_slope=10)
+        alpha = F.leaky_relu(alpha, negative_slope=0.2)
         alpha = softmax(alpha, row)
         # Dropout attentions
         edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)

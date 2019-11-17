@@ -308,6 +308,6 @@ if __name__ == '__main__':
     abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
                   resample_ts=True, transform_edge=True,
                   use_edge_weight_as_node_feature=True,
-                  threshold=None,
-                  atlas='HCPMMP1')
+                  threshold=148*11,
+                  atlas='destrieux')
     pass
