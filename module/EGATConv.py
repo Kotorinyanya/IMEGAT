@@ -96,14 +96,10 @@ class EGATConv(torch.nn.Module):
         # Sum up neighborhoods.
         # att_concat_weight = torch.softmax(self.att_conv_weight, dim=0) if self.heads > 1 \
         #     else torch.tensor([[1.]], device=self.device)
-        if self.concat:
-            out = self.my_cast(alpha, x[col])
-            # alpha is not concatenated at return any way, for edge_weight is 1D
-            # alpha = alpha @ att_concat_weight
+        if not self.concat:
             alpha = alpha.mean(-1).reshape(-1, 1)
-        else:
-            alpha = alpha.mean(-1).reshape(-1, 1)
-            out = self.my_cast(alpha, x[col])
+        out = self.my_cast(alpha, x[col])
+
         out = scatter_add(out, row, dim=0, dim_size=x.size(0))
 
         if self.bias is not None:

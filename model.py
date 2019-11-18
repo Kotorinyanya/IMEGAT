@@ -166,8 +166,8 @@ class Net(nn.Module):
         self.hidden_dim = 10
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 90
-        # self.pool2_nodes = 22
+        self.pool1_nodes = 45
+        self.pool2_nodes = 6
         self.beta_s = 2
         self.first_layer_heads = 5
         self.depth = 3
@@ -184,9 +184,9 @@ class Net(nn.Module):
         self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth)
         self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
                                   first_conv_layer=GraphConv, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
-        # self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
-        # self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
-        #                           first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
+        self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
+        self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
+                                  first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
 
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
