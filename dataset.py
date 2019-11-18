@@ -20,7 +20,7 @@ import urllib.request as request
 
 from scipy.stats import kurtosis, skew
 
-from utils import z_score_norm_data, positive_transform
+from utils import z_score_norm_data, positive_transform, nan_or_inf
 
 from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
@@ -248,10 +248,10 @@ class ABIDE(InMemoryDataset):
 
                 # read anatomical features from dict
                 lh_df, rh_df = anatomical_features_dict[subject]
-                anatomical_features = torch.from_numpy(
+                node_features = torch.from_numpy(
                     np.concatenate([lh_df[self.anatomical_feature_names].values,
                                     rh_df[self.anatomical_feature_names].values])).float()
-                if anatomical_features.shape[0] != num_nodes:
+                if node_features.shape[0] != num_nodes:
                     # check missing nodes, for 'destrieux'
                     continue
 
@@ -281,8 +281,9 @@ class ABIDE(InMemoryDataset):
                         std = torch.tensor(adj.std(-1))
                         skewness = torch.tensor(skew(adj, axis=-1))
                         kurto = torch.tensor(kurtosis(adj, axis=-1))
+                        # assert nan_or_inf(kurto)
                         additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
-                        new_node_features = torch.cat([anatomical_features, additional_feature], dim=-1)
+                        node_features = torch.cat([node_features, additional_feature], dim=-1)
                     # positive transform (to distance)
                     # adj = 1 - np.sqrt((1 - adj) / 2) if self.transform_edge else adj
                     adj = np.abs(adj)
@@ -292,7 +293,7 @@ class ABIDE(InMemoryDataset):
 
                     # create torch_geometric Data
                     edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
-                    data = Data(x=new_node_features,
+                    data = Data(x=node_features,
                                 edge_index=edge_index,
                                 edge_attr=edge_weight,
                                 y=y)
@@ -307,7 +308,7 @@ class ABIDE(InMemoryDataset):
 if __name__ == '__main__':
     abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
                   resample_ts=True, transform_edge=True,
-                  use_edge_weight_as_node_feature=True,
-                  threshold=148*11,
-                  atlas='destrieux')
+                  use_edge_weight_as_node_feature=False,
+                  # threshold=148*11,
+                  atlas='HCPMMP1')
     pass

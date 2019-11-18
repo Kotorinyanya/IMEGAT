@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from torch_geometric.nn import DataParallel
 from boxx import timeit
-from sklearn.model_selection import KFold, GroupShuffleSplit
+from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
@@ -98,7 +98,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
-    folds, fold = GroupShuffleSplit(n_splits=n_splits, random_state=fold_seed if fold_seed is not None else seed), 0
+    folds, fold = GroupKFold(n_splits=n_splits), 0
     print(dataset.__len__())
 
     for train_idx, test_idx in tqdm_notebook(folds.split(list(range(dataset.__len__())),

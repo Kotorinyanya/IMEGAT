@@ -72,6 +72,23 @@ def z_score_norm_data(data):
     return data
 
 
+def custom_norm(tensor):
+    # missing value in dim 2
+    tensor[:, 2][tensor[:, 2] == 0] = .9
+    # log dim
+    dim = [0, 1, 2, 4, 6]
+    tensor[:, dim] = torch.log(tensor[:, dim])
+    tensor[tensor != tensor] = 0  # nan
+    tensor[tensor.eq(float('-inf'))] = 0  # -inf
+    tensor = z_score_norm(tensor)
+    return tensor
+
+
+def custom_norm_data(data):
+    data.x = custom_norm(data.x)
+    return data
+
+
 def new_ones(data):
     data.x = torch.ones_like(data.x)
     return data
