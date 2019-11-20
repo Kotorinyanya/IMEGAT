@@ -195,13 +195,27 @@ def from_2d_tensor_adj(adj):
     """
     maintain gradients
     Args:
-        A : Tensor
+        A : Tensor (num_nodes, num_nodes)
     """
+    assert adj.dim() == 2
     edge_index = adj.nonzero().t().detach()
     row, col = edge_index
     edge_weight = adj[row, col]
 
-    assert len(row) == len(edge_weight)
+    return edge_index, edge_weight
+
+
+def from_3d_tensor_adj(adj):
+    """
+    maintain gradients
+    Args:
+        A : Tensor (dims, num_nodes, num_nodes)
+    """
+    assert adj.dim() == 3
+    # return list(zip(*[from_2d_tensor_adj(adj[k]) for k in range(adj.shape[0])]))
+    edge_index = adj.nonzero()[:, 1:].unique(dim=0).t()  # make sure edge_index is same along axises
+    row, col = edge_index
+    edge_weight = adj.permute(1, 2, 0)[row, col]
     return edge_index, edge_weight
 
 
@@ -230,6 +244,34 @@ def my_to_data_list(batch, num_nodes):
         data_list.append(data)
 
     return data_list
+
+
+def batch_to_adj(edge_index, edge_attr, num_nodes, num_graphs):
+    """
+
+    :param edge_index:
+    :param edge_attr: Tensor with shape (num_edges, dim)
+    :param num_nodes:
+    :param num_graphs:
+    :return: adj with shape (dim, num_graphs, num_nodes, num_nodes)
+    """
+    assert edge_attr.dim() == 2
+    dims = edge_attr.shape[1]
+
+    adjs = []
+    for i in range(num_graphs):
+        start, end = i * num_nodes, (i + 1) * num_nodes
+        mask = ((edge_index >= start) & (edge_index < end))[0]
+        edge_index_i = edge_index.t()[mask] - start  # starts from 0
+        row, col = edge_index_i.t()
+        edge_attr_i = edge_attr[mask]
+        adj_i = torch.zeros((num_nodes, num_nodes, dims)).to(edge_attr.device)
+        adj_i[row, col] = edge_attr_i
+        adj_i = adj_i.permute(2, 0, 1)
+        adjs.append(adj_i)
+    adj = torch.stack(adjs, dim=1)
+
+    return adj
 
 
 def nan_or_inf(x):

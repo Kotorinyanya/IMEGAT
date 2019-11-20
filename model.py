@@ -8,150 +8,9 @@ from utils import *
 from torch import nn
 from torch_geometric.utils import to_scipy_sparse_matrix
 from torch.nn import BatchNorm1d
-from module import InstanceNorm, StablePool
+from module import *
 from functools import partial
 import torch.nn.functional as F
-
-EPS = 1e-15
-
-
-class ResConvBlock(nn.Module):
-    def __init__(self, in_channels, hiddem_dim, out_channels, depth,
-                 first_conv_layer=EGATConv,
-                 hidden_conv_layer=GraphConv,
-                 last_conv_layer=GraphConv,
-                 **kwargs):
-        super(ResConvBlock, self).__init__()
-        self.block_chunk_size = 2
-        self.res_convs = nn.ModuleList()
-        for i in range(depth):
-            if i == 0:  # first layer
-                self.res_convs.append(first_conv_layer(in_channels, hiddem_dim))
-                self.res_convs.append(InstanceNorm(hiddem_dim))
-            elif i == depth - 1:  # last layer
-                self.res_convs.append(hidden_conv_layer(hiddem_dim * 2, out_channels))
-                self.res_convs.append(InstanceNorm(out_channels))
-            else:  # hidden layer
-                self.res_convs.append(last_conv_layer(hiddem_dim * 2, hiddem_dim))
-                self.res_convs.append(InstanceNorm(hiddem_dim))
-
-    def forward(self, x, ei, ea, batch_mask):
-        out_all = []
-
-        # if self.block_chunk_size == 1:  # no batch norm
-        #     for i, conv_block in enumerate(self.res_convs):
-        #         if i >= 1:  # add res block
-        #             x = torch.cat([out_all[-1], x], dim=-1)
-        #         if conv_block.__class__ == EGATConv:  # EGATConv
-        #             x, ea, ei = conv_block(x, ei, ea)
-        #         else:  # GraphConv or etc.
-        #             x = conv_block(x, ei, ea.view(-1))
-        #         out_all.append(x)
-
-        if self.block_chunk_size == 2:  # with batch norm
-            for i, (conv_block, norm_block) in enumerate(chunks(self.res_convs, self.block_chunk_size)):
-                # print(i, "ea", ea[:10].view(-1))
-                if i >= 1:  # add res block
-                    x = torch.cat([out_all[-1], x], dim=-1)
-                if conv_block.__class__ == EGATConv:  # EGATConv
-                    x, ea, ei = conv_block(x, ei, ea.view(-1, 1))
-                else:  # GraphConv or etc.
-                    x = conv_block(x, ei, ea.view(-1))
-                x = F.leaky_relu(x, negative_slope=0.1)
-                # print(i, "x", x[:5, :5])
-                x = norm_block(x, batch_mask)
-                out_all.append(x)
-
-        return out_all
-
-    @property
-    def device(self):
-        return self.res_convs[0].weight.device
-
-
-class Pool(nn.Module):
-    def __init__(self, in_channels, hiddem_dim, pool_nodes, depth):
-        super(Pool, self).__init__()
-        self.block_chunk_size = 2
-        self.pool_nodes = pool_nodes
-        self.detach_pool = True  # detach adj
-        self.conv_depth = depth
-        self.pool_convs = ResConvBlock(in_channels, hiddem_dim, pool_nodes, self.conv_depth,
-                                       first_conv_layer=GraphConv,
-                                       hidden_conv_layer=GraphConv,
-                                       last_conv_layer=GraphConv)
-        self.pool_fc = nn.Sequential(
-            nn.Linear(hiddem_dim * (self.conv_depth - 1) + pool_nodes, 50),
-            nn.Linear(50, pool_nodes)
-        )
-
-    def forward(self, x, edge_index, edge_attr, batch, x_to_pool):
-        # convert edge_index to adj
-        num_nodes = int(batch.num_nodes / batch.num_graphs)
-        adj = torch.stack([
-            torch.tensor(to_scipy_sparse_matrix(data.edge_index, data.edge_attr, num_nodes).todense(),
-                         dtype=torch.float,
-                         device=self.device)
-            for data in batch.to_data_list()], dim=0)
-        # variables
-        batch_mask = batch.batch.to(self.device)
-        num_graphs = batch.num_graphs
-
-        # conv and fc
-        pool_conv_out_all = self.pool_convs(x, edge_index, edge_attr, batch_mask)
-        pool_conv_out_all = torch.cat(pool_conv_out_all, dim=1)
-        assignment = self.pool_fc(pool_conv_out_all)
-        # softmax
-        pool_assignment = self.split_n(assignment, num_graphs)
-        pool_assignment = torch.softmax(pool_assignment, dim=-1)
-        # loss for S
-        modularity_loss = self.modularity_loss(pool_assignment.view(-1, self.pool_nodes), edge_index, edge_attr)
-        entropy_loss = self.entropy_loss(pool_assignment)
-        link_loss = self.link_loss(pool_assignment, adj)
-        # perform pooling
-        # pool_assignment = pool_assignment.detach() if self.detach_pool else pool_assignment
-        pooled_x = pool_assignment.transpose(1, 2) @ self.split_n(x_to_pool, num_graphs)
-        pooled_adj = pool_assignment.transpose(1, 2) @ adj @ pool_assignment
-
-        # convert adj to edge_index
-        data_list = []
-        for i in range(num_graphs):
-            tmp_adj = pooled_adj[i]
-            tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
-            # tmp_adj.clone() to keep gradients
-            edge_index, edge_attr = from_2d_tensor_adj(tmp_adj.detach() if self.detach_pool else tmp_adj.clone())
-            tmp_data = Data(x=pooled_x[i], edge_index=edge_index, edge_attr=edge_attr, num_nodes=self.pool_nodes)
-            data_list.append(tmp_data)
-        pooled_batch = Batch.from_data_list(data_list)
-        # pooled_batch.to_data_list()
-        pooled_edge_index, pooled_edge_attr = pooled_batch.edge_index, pooled_batch.edge_attr
-        pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
-        pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
-
-        return pooled_x, pooled_edge_index, pooled_edge_attr, pooled_batch, entropy_loss, modularity_loss, link_loss
-
-    @staticmethod
-    def split_n(tensor, n):
-        return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
-
-    @staticmethod
-    def modularity_loss(assignment, edge_index, edge_attr=None):
-        edge_attr = 1 if edge_attr is None else edge_attr
-        row, col = edge_index
-        reg = (edge_attr * torch.pow((assignment[row] - assignment[col]), 2).sum(1)).mean()
-        return reg
-
-    @staticmethod
-    def entropy_loss(assignment):
-        return (-assignment * torch.log(assignment + EPS)).sum(dim=-1).mean()
-
-    @staticmethod
-    def link_loss(assignment, adj):
-        return torch.norm(adj - torch.matmul(assignment, assignment.transpose(1, 2)), p=2) / adj.numel()
-
-    @property
-    def device(self):
-        return self.pool_convs.device
 
 
 # noinspection PyTypeChecker
@@ -162,35 +21,37 @@ class Net(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(Net, self).__init__()
 
-        self.in_channels = 11
-        self.hidden_dim = 10
+        self.in_channels = 7
+        self.hidden_dim = 30
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 45
-        self.pool2_nodes = 6
-        self.beta_s = 2
-        self.first_layer_heads = 5
+        self.pool1_nodes = 10
+        # self.pool2_nodes = 6
+        # self.beta_s = 2
+        self.attention_heads = 5
         self.depth = 3
         self.pool_depth = 3
-        self.first_layer_concat = False  # TODO: `True` is not implemented in ResConvBlock
-        self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
-            if self.first_layer_concat else self.hidden_dim
+        self.first_layer_concat = True  # TODO: `True` is not implemented in ResConvBlock
+        self.alpha_dim = self.attention_heads if self.first_layer_concat else 1
+        self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
-        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat,
-                               att_dropout=0)
+        self.attention = Attention(self.in_channels, heads=self.attention_heads, concat=self.first_layer_concat,
+                                   att_dropout=0)
 
-        self.conv1 = ResConvBlock(self.in_channels, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=GraphConv, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
-        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth)
-        self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=GraphConv, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
-        self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
-        self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=partial_egat, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
+        self.conv1 = ParallelResGraphConv(
+            self.in_channels, self.hidden_dim, self.hidden_dim, self.alpha_dim, self.depth)
+        self.pool1 = Pool(
+            self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth, self.alpha_dim)
+        # self.conv2 = ParallelResGraphConv(
+        #     self.hidden_dim, self.hidden_dim, self.hidden_dim, self.alpha_dim, self.depth)
+        # self.pool2 = Pool(
+        #     self.hidden_dim * self.alpha_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth, self.alpha_dim)
+        # self.conv3 = ParallelResGraphConv(
+        #     self.hidden_dim, self.hidden_dim, self.hidden_dim, self.alpha_dim, self.depth)
 
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear((self.first_conv_out_size + self.hidden_dim * (self.depth - 1)) * 2, 50),
+            nn.Linear(self.pool1_nodes * self.hidden_dim, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2)
@@ -203,28 +64,38 @@ class Net(nn.Module):
         x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
 
-        out_all = list()
-        # conv-pool-conv
-        out_all.append(self.conv1(x, edge_index, edge_attr, batch.batch.to(self.device)))
-        p1_x, p1_ei, p1_ea, p1_batch, p1_el, p1_ml, p1_ll = self.pool1(x, edge_index, edge_attr, batch,
-                                                                       out_all[-1][-1])
-        out_all.append(self.conv2(p1_x, p1_ei, p1_ea, p1_batch.batch.to(self.device)))
-        # p2_x, p2_ei, p2_ea, p2_batch, p2_el, p2_ml, p2_ll = self.pool2(p1_x, p1_ei, p1_ea, p1_batch,
-        #                                                                out_all[-1][-1])
-        # out_all.append(self.conv3(p2_x, p2_ei, p2_ea, p2_batch.batch.to(self.device)))
+        # Attention first
+        alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 
-        out_all = sum(out_all, [])  # !!!?
+        out_all = list()
+
+        # conv1
+        conv_out = self.conv1(x, alpha_index, alpha, batch.batch.to(self.device))
+        out_all.append(torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1))
+        # pool1
+        x_to_pool = torch.cat([d[-1] for d in conv_out], dim=1)
+        p1_x, p1_ei, p1_ea, p1_batch, p1_loss = self.pool1(x, alpha_index, alpha, batch, x_to_pool)
+        # # conv2
+        # conv_out = self.conv2(p1_x, p1_ei, p1_ea, p1_batch.batch.to(self.device))
+        # out_all.append(torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1))
+        # # pool2
+        # x_to_pool = torch.cat([d[-1] for d in conv_out], dim=1)
+        # p2_x, p2_ei, p2_ea, p2_batch, p2_loss = self.pool2(x_to_pool, p1_ei, p1_ea, p1_batch, x_to_pool)
+
+        # out_all = sum(out_all, [])  # !!!?
 
         # global pooling
-        global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
+        # global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
         # global_pooled_out_all += [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
-        global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
+        # global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
 
-        reg = p1_ml
-        # reg = torch.tensor([0.], device=self.device)
+        # reg = p1_ml
+        reg = torch.tensor([0.], device=self.device)
         reg = reg.unsqueeze(0)
 
-        fc_out = self.final_fc(global_pooled_out_all)
+        pooled_out_x = p1_x.reshape(batch.num_graphs, -1)
+
+        fc_out = self.final_fc(pooled_out_x)
 
         return fc_out, reg
 
@@ -255,14 +126,11 @@ class CPNet(nn.Module):
         self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
             if self.first_layer_concat else self.hidden_dim
 
-        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat,
-                               att_dropout=0)
-
-        self.conv1 = ResConvBlock(self.in_channels, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=partial_egat)
-        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth)
-        self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=partial_egat)
+        self.egat = EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads,
+                             concat=self.first_layer_concat, att_dropout=0)
+        self.conv1 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth)
+        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth, dims=5)
+        self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth)
         self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
         # self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
         #                           first_conv_layer=partial_egat)
@@ -414,8 +282,8 @@ if __name__ == '__main__':
     from dataset import ABIDE
 
     dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
-    model = CPNet()
+    model = Net()
     data = dataset.__getitem__(0)
-    batch = Batch.from_data_list([data])
+    batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(10)])
     model(batch)
     pass

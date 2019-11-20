@@ -16,7 +16,55 @@ from torch_scatter import scatter_add
 from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf, add_self_loops_mul
 
 
-class EGATConv(torch.nn.Module):
+class Attention(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 heads=1,
+                 concat=True,
+                 att_dropout=0):
+        super(Attention, self).__init__()
+
+        self.concat = concat
+        self.att_dropout = att_dropout
+        self.heads = heads
+        self.in_channels = in_channels
+        self.att_drop = nn.Dropout(att_dropout)
+        self.alpha_fc = nn.Sequential(
+            nn.Linear(2 * in_channels, 32),
+            nn.Linear(32, self.heads),
+        )
+
+    def forward(self, x, edge_index, edge_attr):
+        edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+        edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
+        row, col = edge_index
+
+        # Compute attention coefficients
+        alpha = torch.cat([x[row], x[col]], dim=-1)
+        alpha = self.alpha_fc(alpha)
+        # This will broadcast edge_attr across all attentions
+        alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
+        # alpha = alpha * edge_attr.abs().reshape(-1, 1)
+        # alpha = F.leaky_relu(alpha, negative_slope=0.2)
+        # alpha *= 10  # de-flatten for dense graph
+        # alpha = softmax(alpha, row)
+        # Dropout attentions
+        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
+        # # Add self-loop to alpha
+        # edge_index, alpha = add_self_loops_mul(edge_index, alpha)
+
+        return alpha, edge_index
+
+    @property
+    def device(self):
+        return self.att_weight.device
+
+    def __repr__(self):
+        return '{}({}, heads={}, concat={}, att_dropout={})'.format(self.__class__.__name__, self.in_channels,
+                                                                    self.heads, self.concat, self.att_dropout)
+
+
+class EGATConv(nn.Module):
     """
     Args:
         in_channels (int): Size of each input sample.
@@ -49,13 +97,7 @@ class EGATConv(torch.nn.Module):
 
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
-        self.att_weight = Parameter(torch.Tensor(2 * out_channels, self.heads))
-        # if self.heads > 1:
-        #     self.att_conv_weight = Parameter(torch.Tensor(self.heads, 1))
-        # else:
-        #     self.register_parameter('att_conv_weight', None)
-
-        self.att_drop = nn.Dropout(att_dropout)
+        self.attention = Attention(in_channels, heads, concat, att_dropout)
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels)) if not self.concat else \
@@ -66,36 +108,17 @@ class EGATConv(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        # glorot(self.weight)
         self.weight.data = nn.init.xavier_uniform_(self.weight.data, gain=nn.init.calculate_gain('relu'))
-        self.att_weight.data = nn.init.xavier_uniform_(self.att_weight.data, gain=nn.init.calculate_gain('relu'))
-        # if self.heads > 1:
-        #     self.att_conv_weight.data.fill_(1 / self.heads)
-        # uniform(self.att_weight)
         zeros(self.bias)
 
     def forward(self, x, edge_index, edge_attr):
 
-        edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-        edge_index, edge_attr = add_self_loops_mul(edge_index, edge_attr)
-        row, col = edge_index
+        alpha, edge_index = self.attention(x, edge_index, edge_attr)
 
         x = x @ self.weight
 
-        # Compute attention coefficients
-        alpha = torch.cat([x[row], x[col]], dim=-1)
-        alpha = alpha @ self.att_weight
-        # This will broadcast edge_attr across all attentions
-        alpha = alpha * edge_attr.abs().reshape(-1, 1)
-        alpha = F.leaky_relu(alpha, negative_slope=0.2)
-        alpha = softmax(alpha, row)
-        # Dropout attentions
-        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
         row, col = edge_index
 
-        # Sum up neighborhoods.
-        # att_concat_weight = torch.softmax(self.att_conv_weight, dim=0) if self.heads > 1 \
-        #     else torch.tensor([[1.]], device=self.device)
         if not self.concat:
             alpha = alpha.mean(-1).reshape(-1, 1)
         out = self.my_cast(alpha, x[col])
@@ -131,7 +154,7 @@ if __name__ == '__main__':
     from dataset import ABIDE
 
     dataset = ABIDE(root='../datasets/NYU', transform=z_score_norm_data)
-    conv = EGATConv(11, 30, heads=5, concat=True)
+    conv = EGATConv(7, 30, heads=5, concat=True)
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([data])
     conv(batch.x, batch.edge_index, batch.edge_attr)
