@@ -31,6 +31,7 @@ class Attention(nn.Module):
         self.att_drop = nn.Dropout(att_dropout)
         self.alpha_fc = nn.Sequential(
             nn.Linear(2 * in_channels, 32),
+            nn.ReLU(),
             nn.Linear(32, self.heads),
         )
 
@@ -43,11 +44,11 @@ class Attention(nn.Module):
         alpha = torch.cat([x[row], x[col]], dim=-1)
         alpha = self.alpha_fc(alpha)
         # This will broadcast edge_attr across all attentions
-        alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
-        # alpha = alpha * edge_attr.abs().reshape(-1, 1)
-        # alpha = F.leaky_relu(alpha, negative_slope=0.2)
+        # alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
+        alpha = alpha * edge_attr.abs().reshape(-1, 1)
+        alpha = F.leaky_relu(alpha, negative_slope=0.2)
         # alpha *= 10  # de-flatten for dense graph
-        # alpha = softmax(alpha, row)
+        alpha = softmax(alpha, row)
         # Dropout attentions
         edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
         # # Add self-loop to alpha
@@ -97,7 +98,7 @@ class EGATConv(nn.Module):
 
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
-        self.attention = Attention(in_channels, heads, concat, att_dropout)
+        self.attention = Attention(out_channels, heads, concat, att_dropout)
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels)) if not self.concat else \
@@ -113,9 +114,9 @@ class EGATConv(nn.Module):
 
     def forward(self, x, edge_index, edge_attr):
 
-        alpha, edge_index = self.attention(x, edge_index, edge_attr)
-
         x = x @ self.weight
+
+        alpha, edge_index = self.attention(x, edge_index, edge_attr)
 
         row, col = edge_index
 

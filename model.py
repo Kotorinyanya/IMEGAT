@@ -35,8 +35,13 @@ class Net(nn.Module):
         self.alpha_dim = self.attention_heads if self.first_layer_concat else 1
         self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
+        # self.hidden_x = nn.Sequential(
+        #     nn.Linear(self.in_channels, self.hidden_dim),
+        #     nn.ReLU()
+        # )
+
         self.attention = Attention(self.in_channels, heads=self.attention_heads, concat=self.first_layer_concat,
-                                   att_dropout=0)
+                                   att_dropout=0.)
 
         self.conv1 = ParallelResGraphConv(
             self.in_channels, self.hidden_dim, self.hidden_dim, self.alpha_dim, self.depth)
@@ -53,8 +58,17 @@ class Net(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(self.pool1_nodes * self.hidden_dim, 50),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(50, 2)
+            # nn.BatchNorm1d(100),
+            # # nn.Dropout(dropout),
+            # nn.Linear(100, 50),
+            # nn.ReLU(),
+            # nn.BatchNorm1d(50),
+            # # nn.Dropout(dropout),
+            # nn.Linear(50, 50),
+            # nn.ReLU(),
+            # nn.BatchNorm1d(50),
+            # # nn.Dropout(dropout),
+            nn.Linear(50, 2),
         )
 
     def forward(self, batch):
@@ -65,6 +79,7 @@ class Net(nn.Module):
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
 
         # Attention first
+        # x = self.hidden_x(x)
         alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 
         out_all = list()

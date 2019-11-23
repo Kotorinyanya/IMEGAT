@@ -73,6 +73,11 @@ def z_score_norm_data(data):
 
 
 def custom_norm(tensor):
+    """
+    0-6: ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg', 'ThickStd', 'MeanCurv', 'GausCurv']
+    :param tensor:
+    :return:
+    """
     # missing value in dim 2
     tensor[:, 2][tensor[:, 2] == 0] = .9
     # log dim

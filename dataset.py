@@ -73,7 +73,7 @@ class ABIDE(InMemoryDataset):
         self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
                                          'ThickStd', 'MeanCurv', 'GausCurv']
         super(ABIDE, self).__init__(root, transform)
-        self.data, self.slices, self.group_vector = torch.load(self.processed_paths[0])
+        self.data, self.slices, self.group_vector, self.site_vector = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):
@@ -241,6 +241,7 @@ class ABIDE(InMemoryDataset):
 
         data_list = []
         group_vector, current_group = [], 0
+        site_vector = []
         failed_subject_list = []
         for subject in tqdm(subject_ids, desc='subject_list'):
             try:
@@ -270,6 +271,9 @@ class ABIDE(InMemoryDataset):
                 # group vector for cross validation shuffling
                 group_vector += [current_group] * len(time_series_list)
                 current_group += 1
+                # site vector for multi-site cv
+                site_id = subject.split('_')[0]
+                site_vector += [site_id] * len(time_series_list)
 
                 # correlation form time series
                 connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
@@ -301,14 +305,15 @@ class ABIDE(InMemoryDataset):
                     data_list.append(data)
             except:
                 failed_subject_list.append(subject)
+        print("failed_subject_list", failed_subject_list)
         self.data, self.slices = self.collate(data_list)
-        torch.save((self.data, self.slices, group_vector), self.processed_paths[0])
+        torch.save((self.data, self.slices, group_vector, site_vector), self.processed_paths[0])
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/NYU', transform=z_score_norm_data,
-                  resample_ts=True, transform_edge=True,
+    abide = ABIDE(root='datasets/ALL', transform=z_score_norm_data,
+                  resample_ts=False, transform_edge=True,
                   use_edge_weight_as_node_feature=False,
-                  threshold=360*11,
+                  threshold=360 * 11,
                   atlas='HCPMMP1')
     pass

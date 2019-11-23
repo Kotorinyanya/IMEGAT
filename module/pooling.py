@@ -33,7 +33,7 @@ class Pool(nn.Module):
 
         self.out_x_fc = nn.Sequential(
             nn.Linear(hidden_dim * self.dims, hidden_dim),
-            nn.ReLU()
+            nn.LeakyReLU(negative_slope=0.2)
         )
 
     def forward(self, x, edge_index, edge_attr, batch, x_to_pool):

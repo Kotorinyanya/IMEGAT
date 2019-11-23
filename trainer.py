@@ -305,8 +305,8 @@ if __name__ == "__main__":
     from model import CPNet, Net
 
     dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
-    dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
+    # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net', batch_size=10, patience=200,
-                           num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0, n_splits=2,
+    train_cross_validation(model, dataset, comment='test_net', batch_size=8, patience=200,
+                           num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0, n_splits=5,
                            use_gpu=True, dp=False, ddp=False, device_ids=[0], cuda_device=0, fold_seed=1234)
