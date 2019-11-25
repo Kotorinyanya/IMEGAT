@@ -1,20 +1,13 @@
-from torch_geometric.data import Batch, Data
-from torch_geometric.nn import dense_diff_pool, GATConv
-
-# from torch_geometric.nn import GCNConv
-from module import EGATConv, GraphConv
-from torch_geometric.nn import GCNConv
-from utils import *
-from torch import nn
-from torch_geometric.utils import to_scipy_sparse_matrix
-from torch.nn import BatchNorm1d
-from module import InstanceNorm, StablePool
-from functools import partial
 import torch.nn.functional as F
+from torch import nn
+
+from module import EGATConv, GraphConv
+from module import InstanceNorm
+from utils import *
 
 
 class ResConvBlock(nn.Module):
-    def __init__(self, in_channels, hiddem_dim, out_channels, depth,
+    def __init__(self, in_channels, hidden_dim, out_channels, depth,
                  first_conv_layer=GraphConv,
                  hidden_conv_layer=GraphConv,
                  last_conv_layer=GraphConv,
@@ -24,14 +17,14 @@ class ResConvBlock(nn.Module):
         self.res_convs = nn.ModuleList()
         for i in range(depth):
             if i == 0:  # first layer
-                self.res_convs.append(first_conv_layer(in_channels, hiddem_dim))
-                self.res_convs.append(InstanceNorm(hiddem_dim))
+                self.res_convs.append(first_conv_layer(in_channels, hidden_dim))
+                self.res_convs.append(InstanceNorm(hidden_dim))
             elif i == depth - 1:  # last layer
-                self.res_convs.append(hidden_conv_layer(hiddem_dim * 2, out_channels))
+                self.res_convs.append(hidden_conv_layer(hidden_dim * 2, out_channels))
                 self.res_convs.append(InstanceNorm(out_channels))
             else:  # hidden layer
-                self.res_convs.append(last_conv_layer(hiddem_dim * 2, hiddem_dim))
-                self.res_convs.append(InstanceNorm(hiddem_dim))
+                self.res_convs.append(last_conv_layer(hidden_dim * 2, hidden_dim))
+                self.res_convs.append(InstanceNorm(hidden_dim))
 
     def forward(self, x, edge_index, edge_attr, batch_mask):
         out_all = []
@@ -73,8 +66,10 @@ class ParallelResGraphConv(nn.Module):
 
     def forward(self, x, edge_index, edge_attr, batch_mask):
         assert self.dims == edge_attr.shape[1]  # multi-dimensional edge_attr
+        x = x.reshape(x.shape[0], -1, self.dims)
 
-        return [self.parallel_convs[i](x, edge_index, edge_attr[:, i].view(-1), batch_mask) for i in range(self.dims)]
+        return [self.parallel_convs[i](x[:, :, i], edge_index, edge_attr[:, i].view(-1), batch_mask)
+                for i in range(self.dims)]
 
     @property
     def device(self):
@@ -86,3 +81,65 @@ class ParallelResGraphConv(nn.Module):
             self.in_channels, self.hidden_channels, self.out_channels,
             self.dims, self.depth)
         return string
+
+
+from .pooling import Pool
+
+
+class ConvNPool(nn.Module):
+
+    def __init__(self,
+                 in_channels,
+                 hidden_dim,
+                 out_channels,
+                 attention_heads,
+                 concat,
+                 att_dropout,
+                 conv_depth,
+                 pool_conv_depth,
+                 pool_nodes):
+        super(ConvNPool, self).__init__()
+        self.pool_nodes = pool_nodes
+        self.out_channels = out_channels
+        self.pool_depth = pool_conv_depth
+        self.conv_depth = conv_depth
+        self.att_dropout = att_dropout
+        self.concat = concat
+        self.attention_heads = attention_heads
+        self.hidden_dim = hidden_dim
+        self.in_channels = in_channels
+        self.attention_dim = self.attention_heads if self.concat else 1
+
+        self.egat_conv = EGATConv(
+            self.in_channels, self.hidden_dim, heads=self.attention_heads, concat=self.concat, att_dropout=0.)
+        self.conv = ParallelResGraphConv(
+            self.hidden_dim, self.hidden_dim, self.out_channels, self.attention_dim, self.conv_depth)
+        self.pool = Pool(
+            self.hidden_dim, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim)
+
+    def forward(self, x, edge_index, edge_attr, batch):
+        if edge_attr.dim() == 2:
+            # mean of previous attention heads
+            edge_attr = edge_attr.mean(1)
+
+        # attention
+        x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr)
+
+        # conv
+        conv_out = self.conv(x1, alpha_index, alpha, batch.batch.to(self.device))
+        out_all = torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1)
+
+        # pool
+        x1_to_pool = torch.cat([d[-1] for d in conv_out], dim=1)
+        p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, batch, x1_to_pool)
+
+        return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
+
+    @property
+    def device(self):
+        return self.egat_conv.device
+
+    def __repr__(self):
+        return '{}({}, {}, {}, attention_dim={}, concat={}, att_dropout={}, conv_depth={}, pool_conv_depth={})'.format(
+            self.__class__.__name__, self.in_channels, self.hidden_dim, self.out_channels, self.attention_dim,
+            self.concat, self.att_dropout, self.conv_depth, self.pool_depth)

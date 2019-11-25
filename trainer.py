@@ -300,13 +300,13 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 
 if __name__ == "__main__":
-    from utils import z_score_norm_data, new_ones
+    from utils import z_score_norm_data, new_ones, custom_norm_data
     from dataset import ABIDE
     from model import CPNet, Net
 
-    dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    dataset = ABIDE(root='datasets/NYU', transform=custom_norm_data)
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net', batch_size=8, patience=200,
-                           num_epochs=200, dropout=0.0, lr=1e-3, weight_decay=0.0, n_splits=5,
-                           use_gpu=True, dp=False, ddp=False, device_ids=[0], cuda_device=0, fold_seed=1234)
+    train_cross_validation(model, dataset, comment='test_net', batch_size=40, patience=500,
+                           num_epochs=500, dropout=0.2, lr=3e-4, weight_decay=0.1, n_splits=5,
+                           use_gpu=True, dp=True, ddp=False, device_ids=[1], cuda_device=1, fold_seed=1234)

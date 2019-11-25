@@ -73,7 +73,7 @@ class ABIDE(InMemoryDataset):
         self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
                                          'ThickStd', 'MeanCurv', 'GausCurv']
         super(ABIDE, self).__init__(root, transform)
-        self.data, self.slices, self.group_vector, self.site_vector = torch.load(self.processed_paths[0])
+        self.data, self.slices, self.group_vector = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):

@@ -1,16 +1,8 @@
-from torch_geometric.data import Batch, Data
-from torch_geometric.nn import dense_diff_pool, GATConv
-
-# from torch_geometric.nn import GCNConv
-from module import EGATConv, GraphConv
-from torch_geometric.nn import GCNConv
-from utils import *
 from torch import nn
-from torch_geometric.utils import to_scipy_sparse_matrix
-from torch.nn import BatchNorm1d
-from module import ParallelResGraphConv
-from functools import partial
-import torch.nn.functional as F
+from torch_geometric.data import Batch, Data
+
+from .comb import ParallelResGraphConv
+from utils import *
 
 EPS = 1e-15
 
@@ -70,7 +62,7 @@ class Pool(nn.Module):
         data_list = []
         for i in range(num_graphs):
             tmp_adj = pooled_adj[i]
-            # tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
+            tmp_adj /= (adj.shape[-1] / pooled_adj.shape[-1]) ** 2  # normalize?
             if self.pooling_on_adj:
                 tmp_adj = torch.max(tmp_adj, 0)[0].unsqueeze(0)  # max
                 # tmp_adj = torch.mean(tmp_adj, 0).unsqueeze(0)  # mean
@@ -81,9 +73,9 @@ class Pool(nn.Module):
         # pooled_batch.to_data_list()
         pooled_edge_index, pooled_edge_attr = pooled_batch.edge_index, pooled_batch.edge_attr
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-1])  # merge to batch
-        # pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
+        pooled_x /= (adj.shape[-1] / pooled_adj.shape[-1])  # normalize?
 
-        return pooled_x, pooled_edge_index, pooled_edge_attr, pooled_batch, loss
+        return pooled_x, pooled_edge_index, pooled_edge_attr, pooled_batch, loss, self.pool_assignment
 
     def losses(self):
         modularity_loss = sum([
@@ -92,7 +84,7 @@ class Pool(nn.Module):
             0)
         entropy_loss = self.entropy_loss(self.pool_assignment)
         # link_loss = self.link_loss(self.pool_assignment, adj)
-        return modularity_loss + entropy_loss
+        return modularity_loss + entropy_loss * 0.1
 
     @staticmethod
     def split_n(tensor, n):

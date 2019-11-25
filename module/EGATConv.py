@@ -18,7 +18,7 @@ from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf, add_s
 
 class Attention(nn.Module):
     def __init__(self,
-                 in_channels,
+                 channels,
                  heads=1,
                  concat=True,
                  att_dropout=0):
@@ -27,10 +27,10 @@ class Attention(nn.Module):
         self.concat = concat
         self.att_dropout = att_dropout
         self.heads = heads
-        self.in_channels = in_channels
+        self.channels = channels
         self.att_drop = nn.Dropout(att_dropout)
         self.alpha_fc = nn.Sequential(
-            nn.Linear(2 * in_channels, 32),
+            nn.Linear(2 * channels, 32),
             nn.ReLU(),
             nn.Linear(32, self.heads),
         )
@@ -54,6 +54,9 @@ class Attention(nn.Module):
         # # Add self-loop to alpha
         # edge_index, alpha = add_self_loops_mul(edge_index, alpha)
 
+        if not self.concat:
+            alpha = alpha.mean(-1).reshape(-1, 1)
+
         return alpha, edge_index
 
     @property
@@ -61,7 +64,7 @@ class Attention(nn.Module):
         return self.att_weight.device
 
     def __repr__(self):
-        return '{}({}, heads={}, concat={}, att_dropout={})'.format(self.__class__.__name__, self.in_channels,
+        return '{}({}, heads={}, concat={}, att_dropout={})'.format(self.__class__.__name__, self.channels,
                                                                     self.heads, self.concat, self.att_dropout)
 
 
@@ -87,7 +90,7 @@ class EGATConv(nn.Module):
                  heads=1,
                  concat=False,
                  att_dropout=0,
-                 bias=True):
+                 bias=False):
         super(EGATConv, self).__init__()
 
         self.concat = concat
@@ -119,11 +122,7 @@ class EGATConv(nn.Module):
         alpha, edge_index = self.attention(x, edge_index, edge_attr)
 
         row, col = edge_index
-
-        if not self.concat:
-            alpha = alpha.mean(-1).reshape(-1, 1)
         out = self.my_cast(alpha, x[col])
-
         out = scatter_add(out, row, dim=0, dim_size=x.size(0))
 
         if self.bias is not None:
