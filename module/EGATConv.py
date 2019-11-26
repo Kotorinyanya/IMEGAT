@@ -42,11 +42,18 @@ class Attention(nn.Module):
         alpha = torch.cat([x[row], x[col]], dim=-1)
         alpha = self.alpha_fc(alpha)
         # This will broadcast edge_attr across all attentions
+
+        # sigmoid
         # alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
+
+        # softmax
         alpha = alpha * edge_attr.abs().reshape(-1, 1)
         alpha = F.leaky_relu(alpha, negative_slope=0.2)
         alpha *= 100  # de-flatten
         alpha = softmax(alpha, row)
+
+        assert not nan_or_inf(alpha)
+
         # Dropout attentions
         if self.att_dropout > 0:
             edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)

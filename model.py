@@ -15,9 +15,9 @@ class Net(nn.Module):
         self.hidden_dim = 30
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 90
-        self.pool2_nodes = 25
-        self.pool3_nodes = 6
+        self.pool1_nodes = 10
+        # self.pool2_nodes = 10
+        # self.pool3_nodes = 6
         self.first_attention_heads = 5
         self.conv_depth = 3
         self.pool_conv_depth = 3
@@ -31,34 +31,36 @@ class Net(nn.Module):
                       "concat": self.concat,
                       "att_dropout": self.att_dropout,
                       "conv_depth": self.conv_depth,
-                      "pool_conv_depth": self.pool_conv_depth}
+                      "pool_conv_depth": self.pool_conv_depth,
+                      "ml": 1,
+                      "ll": 1}
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
                               pool_nodes=self.pool1_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
+                              el=1,
                               **cnp_params)
-        self.cnp2 = ConvNPool(in_channels=self.hidden_dim,
-                              pool_nodes=self.pool2_nodes,
-                              attention_heads=1,
-                              in_dims=self.first_attention_heads,
-                              **cnp_params)
-        self.cnp3 = ConvNPool(in_channels=self.hidden_dim,
-                              pool_nodes=self.pool3_nodes,
-                              attention_heads=1,
-                              in_dims=self.first_attention_heads,
-                              **cnp_params)
+        self.conv2 = ConvNPool(in_channels=self.hidden_dim,
+                               attention_heads=1,
+                               in_dims=self.first_attention_heads,
+                               no_pool=True,
+                               **cnp_params)
+        # self.cnp3 = ConvNPool(in_channels=self.hidden_dim,
+        #                       pool_nodes=self.pool3_nodes,
+        #                       attention_heads=1,
+        #                       in_dims=self.first_attention_heads,
+        #                       **cnp_params)
 
-        self.ins_norm = nn.ModuleList([
-            InstanceNorm(self.hidden_dim),
-            InstanceNorm(self.hidden_dim),
-            InstanceNorm(self.hidden_dim)
-        ])
+        # self.ins_norm = nn.ModuleList([
+        #     InstanceNorm(self.hidden_dim),
+        #     InstanceNorm(self.hidden_dim)
+        # ])
 
         self.final_fc = nn.Sequential(
             # nn.BatchNorm1d(self.pool3_nodes * self.hidden_dim * 3),
             nn.Dropout(dropout),
-            nn.Linear(self.pool3_nodes * self.hidden_dim * self.alpha_dim * 3, 100),
+            nn.Linear(self.pool1_nodes * self.hidden_dim * self.alpha_dim * 1, 100),
             nn.ReLU(),
             nn.Dropout(dropout),
             # nn.Linear(100, 100),
@@ -75,40 +77,31 @@ class Net(nn.Module):
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
         num_graphs = batch.num_graphs
 
-        out_all = list()
-
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
-        cnp2_out_all, p2_x, p2_ei, p2_ea, p2_batch, p2_loss, p2_assignment = self.cnp2(p1_x, p1_ei, p1_ea, p1_batch)
-        cnp3_out_all, p3_x, p3_ei, p3_ea, p3_batch, p3_loss, p3_assignment = self.cnp3(p2_x, p2_ei, p2_ea, p2_batch)
-
-        # global pooling
-        # global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
-        # global_pooled_out_all += [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
-        # global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
-
-        reg = p1_loss + p2_loss + p3_loss
-        # reg = torch.tensor([0.], device=self.device)
+        conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
+        # cnp3_out_all, p3_x, p3_ei, p3_ea, p3_batch, p3_loss, p3_assignment = self.cnp3(p2_x, p2_ei, p2_ea, p2_batch)
+        reg = p1_loss
         reg = reg.unsqueeze(0)
 
-        x1 = p3_assignment.transpose(-2, -1).detach() @ \
-             p2_assignment.transpose(-2, -1).detach() @ \
-             p1_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
-             (self.pool1_nodes / self.pool3_nodes)  # normalize
-        x1 = x1.permute(1, 2, 3, 0)
-        x2 = p3_assignment.transpose(-2, -1).detach() @ \
-             p2_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
-             (self.pool2_nodes / self.pool3_nodes)  # normalize
-        x2 = x2.permute(1, 2, 3, 0)
-        x3 = p3_x
-        all_pooled_x = [x1, x2, x3]
-        for i, x in enumerate(all_pooled_x):
-            x = x.reshape(x3.shape[0], -1)
-            x = self.ins_norm[i](x, p3_batch.batch.to(self.device))
-            all_pooled_x[i] = x.reshape(num_graphs, -1)
-        all_pooled_x = torch.cat(all_pooled_x, dim=-1)
+        # x1 = p3_assignment.transpose(-2, -1).detach() @ \
+        #      p2_assignment.transpose(-2, -1).detach() @ \
+        #      p1_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
+        #      (self.pool1_nodes / self.pool3_nodes)  # normalize
+        # x1 = x1.permute(1, 2, 3, 0)
+        # x2 = p3_assignment.transpose(-2, -1).detach() @ \
+        #      p2_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
+        #      (self.pool2_nodes / self.pool3_nodes)  # normalize
+        # x2 = x2.permute(1, 2, 3, 0)
+        # x3 = p3_x
+        # all_pooled_x = [x1, x2, x3]
+        # for i, x in enumerate(all_pooled_x):
+        #     x = x.reshape(x3.shape[0], -1)
+        #     x = self.ins_norm[i](x, p3_batch.batch.to(self.device))
+        #     all_pooled_x[i] = x.reshape(num_graphs, -1)
+        # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
-        fc_out = self.final_fc(all_pooled_x.reshape(num_graphs, -1))
+        fc_out = self.final_fc(conv_out_2.reshape(num_graphs, -1))
 
         return fc_out, reg
 

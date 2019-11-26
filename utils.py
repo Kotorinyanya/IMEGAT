@@ -4,7 +4,7 @@ import os.path as osp
 import torch
 from scipy.sparse import coo_matrix
 from torch_geometric.data import Data, Batch
-from torch_geometric.utils import to_scipy_sparse_matrix
+from torch_geometric.utils import to_scipy_sparse_matrix, add_remaining_self_loops
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 import numpy as np
 import socket
@@ -167,6 +167,27 @@ def real_softmax(src, index, num_nodes=None):
     assert not nan_or_inf(oout)
 
     return oout
+
+
+def norm_edge_attr(edge_index, num_nodes, edge_weight, type=1, improved=False, dtype=None):
+
+    # fill_value = 1 if not improved else 2
+    # edge_index, edge_weight = add_remaining_self_loops(
+    #     edge_index, edge_weight, fill_value, num_nodes)
+
+    row, col = edge_index
+    deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
+    if type == 1:
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        norm = deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
+    elif type == 2:
+        deg_inv = deg.pow(-1)
+        norm = deg_inv[row] * edge_weight
+    elif type == 3:
+        norm = edge_weight
+
+    return edge_index, norm
 
 
 def entropy(src, edge_index, num_nodes=None):

@@ -141,8 +141,31 @@ class ConvNPool(nn.Module):
                  att_dropout,
                  conv_depth,
                  pool_conv_depth,
-                 pool_nodes):
+                 ml=1,
+                 el=1,
+                 ll=1,
+                 pool_nodes=None,
+                 no_pool=False):
+        """
+
+        :param in_channels:
+        :param hidden_dim:
+        :param out_channels:
+        :param attention_heads:
+        :param in_dims: multi-dimensional graph
+        :param concat: for EGAT
+        :param att_dropout: attention dropout
+        :param conv_depth: ResConv
+        :param pool_conv_depth: ResConv in Pool
+        :param pool_nodes:
+        :param ml: c for modularity loss
+        :param el: c for entropy loss, large c for a hard pooling, small c for soft pooling
+        """
         super(ConvNPool, self).__init__()
+        self.ll = ll
+        self.no_pool = no_pool
+        self.el = el
+        self.ml = ml
         self.in_dims = in_dims
         self.pool_nodes = pool_nodes
         self.out_channels = out_channels
@@ -166,26 +189,35 @@ class ConvNPool(nn.Module):
         else:
             raise Exception("???")
 
-        # ResConv & Pool
+        # ResConv
         self.conv = ParallelResGraphConv(
             self.hidden_dim, self.hidden_dim, self.out_channels, self.attention_dim, self.conv_depth)
-        self.pool = Pool(
-            self.hidden_dim, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim)
+
+        # Pool
+        if not self.no_pool:
+            self.pool = Pool(
+                self.hidden_dim, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim, self.ml,
+                self.el, self.ll)
 
     def forward(self, x, edge_index, edge_attr, batch):
 
         # attention
         x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr)
+        self.alpha, self.alpha_index = alpha, alpha_index
 
         # conv
         conv_out = self.conv(x1, alpha_index, alpha, batch.batch.to(self.device))
         out_all = torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1)
+        out_last = torch.cat([d[-1] for d in conv_out], dim=-1)
 
-        # pool
-        x1_to_pool = torch.cat([d[-1] for d in conv_out], dim=1)
-        p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, x1_to_pool, batch)
-
-        return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
+        if not self.no_pool:
+            # pool
+            x1_to_pool = out_last
+            p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, x1_to_pool, batch)
+            return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
+        else:
+            # without pool
+            return out_last
 
     @property
     def device(self):

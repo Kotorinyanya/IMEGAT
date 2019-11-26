@@ -20,7 +20,7 @@ from warmup_scheduler import GradualWarmupScheduler
 
 from livelossplot import PlotLosses
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
@@ -220,7 +220,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                 accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
                 epoch_total_loss = running_total_loss / dataloader.__len__()
                 epoch_nll_loss = running_nll_loss / dataloader.__len__()
-                epoch_reg_loss = running_reg_loss / dataloader.dataset.__len__()
+                epoch_reg_loss = running_reg_loss / dataloader.__len__()
 
                 # print('epoch {} {}_nll_loss: {}'.format(epoch, phase, epoch_nll_loss))
                 writer.add_scalars('nll_loss',
@@ -241,6 +241,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     writer.add_scalars('reg_loss'.format(phase),
                                        {'{}_reg_loss'.format(phase): epoch_reg_loss},
                                        epoch)
+                print(epoch_reg_loss)
                 writer.add_histogram('hist/{}_yhat_0'.format(phase),
                                      epoch_yhat_0,
                                      epoch)
@@ -310,5 +311,5 @@ if __name__ == "__main__":
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
     train_cross_validation(model, dataset, comment='test_net', batch_size=40, patience=500,
-                           num_epochs=500, dropout=0.2, lr=1e-3, weight_decay=0.1, n_splits=5,
+                           num_epochs=500, dropout=0.2, lr=3e-4, weight_decay=0.1, n_splits=5,
                            use_gpu=True, dp=False, ddp=False, device_ids=[2], cuda_device=2, fold_seed=1234)
