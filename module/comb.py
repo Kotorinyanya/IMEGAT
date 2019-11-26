@@ -83,6 +83,49 @@ class ParallelResGraphConv(nn.Module):
         return string
 
 
+class ParallelEGAT(nn.Module):
+    """
+    handel multi-dimensional edge_attr
+    """
+
+    def __init__(self, in_channels, out_channels, dims, att_dropout=0.):
+        super(ParallelEGAT, self).__init__()
+        self.att_dropout = att_dropout
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.dims = dims
+        self.parallel_convs = nn.ModuleList([
+            EGATConv(in_channels, out_channels, heads=1, concat=False, att_dropout=self.att_dropout)
+            for _ in range(self.dims)
+        ])
+
+    def forward(self, x, edge_index, edge_attr):
+        assert self.dims == edge_attr.shape[1]  # multi-dimensional edge_attr
+        x = x.reshape(x.shape[0], -1, self.dims)
+
+        out_l, alpha_l, alpha_index_l = [], [], []
+        for i in range(self.dims):
+            out_i, alpha_i, alpha_index_i = self.parallel_convs[i](x[:, :, i], edge_index, edge_attr[:, i].view(-1))
+            out_l.append(out_i)
+            alpha_l.append(alpha_i)
+            alpha_index_l.append(alpha_index_i)
+        out = torch.cat(out_l, dim=-1)
+        alpha = torch.cat(alpha_l, dim=-1)
+        alpha_index = alpha_index_l[0]
+        return out, alpha, alpha_index
+
+    @property
+    def device(self):
+        return self.parallel_convs[0].device
+
+    def __repr__(self):
+        string = '{}({}, {}, {}, dims={}, depth={})'.format(
+            self.__class__.__name__,
+            self.in_channels, self.hidden_channels, self.out_channels,
+            self.dims, self.depth)
+        return string
+
+
 from .pooling import Pool
 
 
@@ -93,12 +136,14 @@ class ConvNPool(nn.Module):
                  hidden_dim,
                  out_channels,
                  attention_heads,
+                 in_dims,
                  concat,
                  att_dropout,
                  conv_depth,
                  pool_conv_depth,
                  pool_nodes):
         super(ConvNPool, self).__init__()
+        self.in_dims = in_dims
         self.pool_nodes = pool_nodes
         self.out_channels = out_channels
         self.pool_depth = pool_conv_depth
@@ -108,19 +153,26 @@ class ConvNPool(nn.Module):
         self.attention_heads = attention_heads
         self.hidden_dim = hidden_dim
         self.in_channels = in_channels
-        self.attention_dim = self.attention_heads if self.concat else 1
 
-        self.egat_conv = EGATConv(
-            self.in_channels, self.hidden_dim, heads=self.attention_heads, concat=self.concat, att_dropout=0.)
+        # EGAT
+        if self.in_dims == 1:
+            self.attention_dim = self.attention_heads if self.concat else 1
+            self.egat_conv = EGATConv(
+                self.in_channels, self.hidden_dim, heads=self.attention_heads, concat=self.concat, att_dropout=0.)
+        elif self.in_dims > 1 and self.attention_heads == 1:
+            self.attention_dim = self.in_dims
+            self.egat_conv = ParallelEGAT(
+                self.in_channels, self.hidden_dim, dims=self.in_dims, att_dropout=0.)
+        else:
+            raise Exception("???")
+
+        # ResConv & Pool
         self.conv = ParallelResGraphConv(
             self.hidden_dim, self.hidden_dim, self.out_channels, self.attention_dim, self.conv_depth)
         self.pool = Pool(
             self.hidden_dim, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim)
 
     def forward(self, x, edge_index, edge_attr, batch):
-        if edge_attr.dim() == 2:
-            # mean of previous attention heads
-            edge_attr = edge_attr.mean(1)
 
         # attention
         x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr)
@@ -131,7 +183,7 @@ class ConvNPool(nn.Module):
 
         # pool
         x1_to_pool = torch.cat([d[-1] for d in conv_out], dim=1)
-        p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, batch, x1_to_pool)
+        p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, x1_to_pool, batch)
 
         return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
 

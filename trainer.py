@@ -20,6 +20,8 @@ from warmup_scheduler import GradualWarmupScheduler
 
 from livelossplot import PlotLosses
 
+torch.autograd.set_detect_anomaly(True)
+
 
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            weight_decay=1e-2, num_epochs=200, n_splits=5,
@@ -308,5 +310,5 @@ if __name__ == "__main__":
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
     train_cross_validation(model, dataset, comment='test_net', batch_size=40, patience=500,
-                           num_epochs=500, dropout=0.2, lr=3e-4, weight_decay=0.1, n_splits=5,
-                           use_gpu=True, dp=True, ddp=False, device_ids=[1], cuda_device=1, fold_seed=1234)
+                           num_epochs=500, dropout=0.2, lr=1e-3, weight_decay=0.1, n_splits=5,
+                           use_gpu=True, dp=False, ddp=False, device_ids=[2], cuda_device=2, fold_seed=1234)

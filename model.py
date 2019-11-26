@@ -1,6 +1,5 @@
 # from torch_geometric.nn import GCNConv
 from functools import partial
-
 from module import *
 
 
@@ -19,36 +18,47 @@ class Net(nn.Module):
         self.pool1_nodes = 90
         self.pool2_nodes = 25
         self.pool3_nodes = 6
-        self.attention_heads = 5
+        self.first_attention_heads = 5
         self.conv_depth = 3
         self.pool_conv_depth = 3
         self.att_dropout = 0.
         self.concat = True
-        self.alpha_dim = self.attention_heads if self.concat else 1
+        self.alpha_dim = self.first_attention_heads if self.concat else 1
         self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
         cnp_params = {"hidden_dim": self.hidden_dim,
                       "out_channels": self.hidden_dim,
-                      "attention_heads": self.attention_heads,
                       "concat": self.concat,
                       "att_dropout": self.att_dropout,
                       "conv_depth": self.conv_depth,
                       "pool_conv_depth": self.pool_conv_depth}
 
-        self.cnp1 = ConvNPool(in_channels=self.in_channels, pool_nodes=self.pool1_nodes, **cnp_params)
-        self.cnp2 = ConvNPool(in_channels=self.hidden_dim, pool_nodes=self.pool2_nodes, **cnp_params)
-        self.cnp3 = ConvNPool(in_channels=self.hidden_dim, pool_nodes=self.pool3_nodes, **cnp_params)
+        self.cnp1 = ConvNPool(in_channels=self.in_channels,
+                              pool_nodes=self.pool1_nodes,
+                              attention_heads=self.first_attention_heads,
+                              in_dims=1,
+                              **cnp_params)
+        self.cnp2 = ConvNPool(in_channels=self.hidden_dim,
+                              pool_nodes=self.pool2_nodes,
+                              attention_heads=1,
+                              in_dims=self.first_attention_heads,
+                              **cnp_params)
+        self.cnp3 = ConvNPool(in_channels=self.hidden_dim,
+                              pool_nodes=self.pool3_nodes,
+                              attention_heads=1,
+                              in_dims=self.first_attention_heads,
+                              **cnp_params)
 
-        self.bn = nn.ModuleList([
-            nn.BatchNorm1d(self.hidden_dim * self.pool3_nodes),
-            nn.BatchNorm1d(self.hidden_dim * self.pool3_nodes),
-            nn.BatchNorm1d(self.hidden_dim * self.pool3_nodes)
+        self.ins_norm = nn.ModuleList([
+            InstanceNorm(self.hidden_dim),
+            InstanceNorm(self.hidden_dim),
+            InstanceNorm(self.hidden_dim)
         ])
 
         self.final_fc = nn.Sequential(
             # nn.BatchNorm1d(self.pool3_nodes * self.hidden_dim * 3),
             nn.Dropout(dropout),
-            nn.Linear(self.pool3_nodes * self.hidden_dim * 3, 100),
+            nn.Linear(self.pool3_nodes * self.hidden_dim * self.alpha_dim * 3, 100),
             nn.ReLU(),
             nn.Dropout(dropout),
             # nn.Linear(100, 100),
@@ -81,21 +91,24 @@ class Net(nn.Module):
         # reg = torch.tensor([0.], device=self.device)
         reg = reg.unsqueeze(0)
 
-        x1 = p3_assignment.transpose(1, 2).detach() @ \
-             p2_assignment.transpose(1, 2).detach() @ \
-             self.split_n(p1_x, num_graphs) / \
+        x1 = p3_assignment.transpose(-2, -1).detach() @ \
+             p2_assignment.transpose(-2, -1).detach() @ \
+             p1_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
              (self.pool1_nodes / self.pool3_nodes)  # normalize
-        x2 = p3_assignment.transpose(1, 2).detach() @ \
-             self.split_n(p2_x, num_graphs) / \
+        x1 = x1.permute(1, 2, 3, 0)
+        x2 = p3_assignment.transpose(-2, -1).detach() @ \
+             p2_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
              (self.pool2_nodes / self.pool3_nodes)  # normalize
+        x2 = x2.permute(1, 2, 3, 0)
         x3 = p3_x
         all_pooled_x = [x1, x2, x3]
         for i, x in enumerate(all_pooled_x):
+            x = x.reshape(x3.shape[0], -1)
+            x = self.ins_norm[i](x, p3_batch.batch.to(self.device))
             all_pooled_x[i] = x.reshape(num_graphs, -1)
-            all_pooled_x[i] = self.bn[i](all_pooled_x[i])
         all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
-        fc_out = self.final_fc(all_pooled_x)
+        fc_out = self.final_fc(all_pooled_x.reshape(num_graphs, -1))
 
         return fc_out, reg
 

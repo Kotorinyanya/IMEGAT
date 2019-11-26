@@ -3,6 +3,7 @@ import os.path as osp
 
 import torch
 from scipy.sparse import coo_matrix
+from torch_geometric.data import Data, Batch
 from torch_geometric.utils import to_scipy_sparse_matrix
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 import numpy as np
@@ -277,6 +278,53 @@ def batch_to_adj(edge_index, edge_attr, num_nodes, num_graphs):
     adj = torch.stack(adjs, dim=1)
 
     return adj
+
+
+def adj_to_batch(adj):
+    """
+
+    :param adj: Tensor with shape (dim, num_graphs, num_nodes, num_nodes)
+    :return: edge_index, edge_attr, batch_mask
+    """
+    assert adj.dim() == 4
+    num_graphs = adj.shape[1]
+    num_nodes = adj.shape[2]
+
+    edge_index = torch.tensor([], device=adj.device, dtype=torch.long)
+    edge_attr = torch.tensor([], device=adj.device, dtype=adj.dtype)
+    for i in range(num_graphs):
+        adj_i = adj[:, i, :, :]
+        edge_index_i, edge_attr_i = from_3d_tensor_adj(adj_i)
+        edge_index_i += i * num_nodes  # batch code
+        edge_index = torch.cat([edge_index, edge_index_i], dim=1)
+        edge_attr = torch.cat([edge_attr, edge_attr_i], dim=0)
+
+    batch_mask = torch.tensor(sum([[i] * num_nodes for i in range(num_graphs)], []), device=adj.device)
+
+    return edge_index, edge_attr, batch_mask
+
+
+def adj_to_tg_batch(adj, detach_pool=False):
+    """
+
+    :param detach_pool:
+    :param adj: Tensor with shape (dim, num_graphs, num_nodes, num_nodes)
+    :return:
+    """
+    assert adj.dim() == 4
+    num_graphs = adj.shape[1]
+    num_nodes = adj.shape[2]
+
+    data_list = []
+    for i in range(num_graphs):
+        tmp_adj = adj[:, i, :, :]
+        edge_index, edge_attr = from_3d_tensor_adj(tmp_adj.detach() if detach_pool else tmp_adj.clone())
+        tmp_data = Data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=num_nodes)
+        data_list.append(tmp_data)
+    pooled_batch = Batch.from_data_list(data_list)
+    pooled_edge_index, pooled_edge_attr = pooled_batch.edge_index, pooled_batch.edge_attr
+
+    return pooled_edge_index, pooled_edge_attr, pooled_batch
 
 
 def nan_or_inf(x):

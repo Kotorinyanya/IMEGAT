@@ -30,9 +30,7 @@ class Attention(nn.Module):
         self.channels = channels
         self.att_drop = nn.Dropout(att_dropout)
         self.alpha_fc = nn.Sequential(
-            nn.Linear(2 * channels, 32),
-            nn.ReLU(),
-            nn.Linear(32, self.heads),
+            nn.Linear(2 * channels, self.heads),
         )
 
     def forward(self, x, edge_index, edge_attr):
@@ -47,10 +45,11 @@ class Attention(nn.Module):
         # alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
         alpha = alpha * edge_attr.abs().reshape(-1, 1)
         alpha = F.leaky_relu(alpha, negative_slope=0.2)
-        # alpha *= 10  # de-flatten for dense graph
+        alpha *= 100  # de-flatten
         alpha = softmax(alpha, row)
         # Dropout attentions
-        edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
+        if self.att_dropout > 0:
+            edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
         # # Add self-loop to alpha
         # edge_index, alpha = add_self_loops_mul(edge_index, alpha)
 
@@ -119,9 +118,9 @@ class EGATConv(nn.Module):
 
         x = x @ self.weight
 
-        alpha, edge_index = self.attention(x, edge_index, edge_attr)
+        alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 
-        row, col = edge_index
+        row, col = alpha_index
         out = self.my_cast(alpha, x[col])
         out = scatter_add(out, row, dim=0, dim_size=x.size(0))
 
@@ -129,7 +128,7 @@ class EGATConv(nn.Module):
             out = out + self.bias
 
         assert not nan_or_inf(out)
-        return out, alpha, edge_index
+        return out, alpha, alpha_index
 
     @staticmethod
     def my_cast(alpha, x):
@@ -137,7 +136,7 @@ class EGATConv(nn.Module):
         for i in range(alpha.shape[1]):
             result = alpha[:, i].reshape(-1, 1) * x
             results.append(result)
-        return torch.cat(results, dim=-1)
+        return torch.stack(results, dim=-1)
 
     @property
     def device(self):
