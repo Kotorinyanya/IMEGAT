@@ -20,7 +20,7 @@ import urllib.request as request
 
 from scipy.stats import kurtosis, skew
 
-from utils import z_score_norm_data, positive_transform, nan_or_inf
+from utils import z_score_norm_data, positive_transform, nan_or_inf, check_strongly_connected, fisher_z
 
 from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
@@ -33,7 +33,7 @@ class ABIDE(InMemoryDataset):
                  name='ABIDE',
                  transform=None,
                  resample_ts=False,
-                 transform_edge=False,
+                 transform_edge=None,
                  use_edge_weight_as_node_feature=True,
                  threshold=None,
                  atlas='HCPMMP1',
@@ -73,7 +73,7 @@ class ABIDE(InMemoryDataset):
         self.anatomical_feature_names = ['NumVert', 'SurfArea', 'GrayVol', 'ThickAvg',
                                          'ThickStd', 'MeanCurv', 'GausCurv']
         super(ABIDE, self).__init__(root, transform)
-        self.data, self.slices, self.group_vector = torch.load(self.processed_paths[0])
+        self.data, self.slices, self.group_vector, self.site_vector = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):
@@ -288,13 +288,13 @@ class ABIDE(InMemoryDataset):
                         # assert nan_or_inf(kurto)
                         additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
                         node_features = torch.cat([node_features, additional_feature], dim=-1)
-                    # positive transform (to distance)
-                    # adj = 1 - np.sqrt((1 - adj) / 2) if self.transform_edge else adj
-                    adj = np.abs(adj)
+                    # transform adj
+                    np.fill_diagonal(adj, 0)  # remove self-loop for transform
+                    adj = self.transform_edge(adj) if self.transform_edge is not None else adj
                     # set a threshold for adj
                     if self.threshold is not None:
                         adj = top_k_percent_adj(adj, self.threshold)
-
+                        assert check_strongly_connected(adj) == True
                     # create torch_geometric Data
                     edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
                     data = Data(x=node_features,
@@ -311,9 +311,9 @@ class ABIDE(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    abide = ABIDE(root='datasets/ALL', transform=z_score_norm_data,
-                  resample_ts=False, transform_edge=True,
+    abide = ABIDE(root='datasets/NYU',
+                  resample_ts=True, transform_edge=fisher_z,
                   use_edge_weight_as_node_feature=False,
-                  threshold=360 * 11,
+                  threshold=None,
                   atlas='HCPMMP1')
     pass

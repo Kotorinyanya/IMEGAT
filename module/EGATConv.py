@@ -34,23 +34,22 @@ class Attention(nn.Module):
         )
 
     def forward(self, x, edge_index, edge_attr):
-        edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-        edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
+        # edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+        # edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
         row, col = edge_index
 
         # Compute attention coefficients
         alpha = torch.cat([x[row], x[col]], dim=-1)
         alpha = self.alpha_fc(alpha)
-        # This will broadcast edge_attr across all attentions
 
         # sigmoid
-        # alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
+        alpha = torch.sigmoid(alpha) * edge_attr.abs().reshape(-1, 1)
 
         # softmax
-        alpha = alpha * edge_attr.abs().reshape(-1, 1)
-        alpha = F.leaky_relu(alpha, negative_slope=0.2)
-        alpha *= 100  # de-flatten
-        alpha = softmax(alpha, row)
+        # alpha = alpha * edge_attr.abs().reshape(-1, 1)
+        # alpha = F.leaky_relu(alpha, negative_slope=0.2)
+        # # alpha *= 100  # de-flatten
+        # alpha = softmax(alpha, row)
 
         assert not nan_or_inf(alpha)
 

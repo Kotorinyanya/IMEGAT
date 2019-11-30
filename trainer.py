@@ -12,7 +12,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm_notebook
 
-from utils import get_model_log_dir, to_cuda
+from utils import get_model_log_dir, to_cuda, norm_train_test
 import time
 import numpy as np
 
@@ -20,13 +20,14 @@ from warmup_scheduler import GradualWarmupScheduler
 
 from livelossplot import PlotLosses
 
+
 # torch.autograd.set_detect_anomaly(True)
 
 
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                            weight_decay=1e-2, num_epochs=200, n_splits=5,
                            use_gpu=True, dp=False, ddp=False,
-                           comment='', tb_service_loc='192.168.192.58:6007', batch_size=1,
+                           comment='', tb_service_loc='192.168.192.57:6007', batch_size=1,
                            num_workers=0, pin_memory=False, cuda_device=None,
                            ddp_port='23456', fold_no=None, saved_model_path=None,
                            device_ids=None, patience=20, seed=None, fold_seed=None,
@@ -122,13 +123,15 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         model = model_cls(writer, dropout=dropout)
 
-        train_dataloader = DataLoader(dataset.__indexing__(train_idx),
+        train_dataset, test_dataset = norm_train_test(dataset, train_idx, test_idx)
+
+        train_dataloader = DataLoader(train_dataset,
                                       shuffle=True,
                                       batch_size=batch_size,
                                       collate_fn=lambda data_list: data_list,
                                       num_workers=num_workers,
                                       pin_memory=pin_memory)
-        test_dataloader = DataLoader(dataset.__indexing__(test_idx),
+        test_dataloader = DataLoader(test_dataset,
                                      shuffle=False,
                                      batch_size=batch_size,
                                      collate_fn=lambda data_list: data_list,
@@ -305,11 +308,12 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 if __name__ == "__main__":
     from utils import z_score_norm_data, new_ones, custom_norm_data
     from dataset import ABIDE
-    from model import CPNet, Net
+    from model import Net
 
-    dataset = ABIDE(root='datasets/NYU', transform=custom_norm_data)
+    dataset = ABIDE(root='datasets/NYU')
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net', batch_size=40, patience=500,
-                           num_epochs=500, dropout=0.2, lr=3e-4, weight_decay=0.1, n_splits=5,
-                           use_gpu=True, dp=False, ddp=False, device_ids=[2], cuda_device=2, fold_seed=1234)
+    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=8, patience=200,
+                           num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.1, n_splits=5,
+                           use_gpu=True, dp=True, ddp=False,
+                           device_ids=[1, 2, 3, 4], fold_seed=1234)

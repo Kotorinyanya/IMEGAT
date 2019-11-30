@@ -15,7 +15,7 @@ class Net(nn.Module):
         self.hidden_dim = 30
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 10
+        self.pool1_nodes = 6
         # self.pool2_nodes = 10
         # self.pool3_nodes = 6
         self.first_attention_heads = 5
@@ -32,20 +32,20 @@ class Net(nn.Module):
                       "att_dropout": self.att_dropout,
                       "conv_depth": self.conv_depth,
                       "pool_conv_depth": self.pool_conv_depth,
-                      "ml": 1,
-                      "ll": 1}
+                      "ml": 0,
+                      "ll": 0}
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
                               pool_nodes=self.pool1_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
-                              el=1,
+                              el=0,
                               **cnp_params)
-        self.conv2 = ConvNPool(in_channels=self.hidden_dim,
-                               attention_heads=1,
-                               in_dims=self.first_attention_heads,
-                               no_pool=True,
-                               **cnp_params)
+        # self.conv2 = ConvNPool(in_channels=self.hidden_dim,
+        #                        attention_heads=1,
+        #                        in_dims=self.first_attention_heads,
+        #                        no_pool=True,
+        #                        **cnp_params)
         # self.cnp3 = ConvNPool(in_channels=self.hidden_dim,
         #                       pool_nodes=self.pool3_nodes,
         #                       attention_heads=1,
@@ -79,7 +79,7 @@ class Net(nn.Module):
 
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
-        conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
+        # conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
         # cnp3_out_all, p3_x, p3_ei, p3_ea, p3_batch, p3_loss, p3_assignment = self.cnp3(p2_x, p2_ei, p2_ea, p2_batch)
         reg = p1_loss
         reg = reg.unsqueeze(0)
@@ -101,90 +101,13 @@ class Net(nn.Module):
         #     all_pooled_x[i] = x.reshape(num_graphs, -1)
         # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
-        fc_out = self.final_fc(conv_out_2.reshape(num_graphs, -1))
+        fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
         return fc_out, reg
 
     @property
     def device(self):
         return self.cnp1.device
-
-    @staticmethod
-    def split_n(tensor, n):
-        return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
-
-
-class CPNet(nn.Module):
-
-    def __init__(self, writer=None, dropout=0.0):
-        super(CPNet, self).__init__()
-
-        self.in_channels = 11
-        self.hidden_dim = 10
-        self.in_nodes = 360
-        self.pool1_nodes = 90
-        self.pool2_nodes = 22
-        # self.pool3_nodes = 8
-        self.first_layer_heads = 5
-        self.depth = 1
-        self.pool_depth = 2
-        self.first_layer_concat = False  # TODO: `True` is not implemented in ResConvBlock
-        self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
-            if self.first_layer_concat else self.hidden_dim
-
-        self.egat = EGATConv(self.in_channels, self.hidden_dim, heads=self.first_layer_heads,
-                             concat=self.first_layer_concat, att_dropout=0)
-        self.conv1 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth)
-        self.pool1 = Pool(self.in_channels, self.hidden_dim, self.pool1_nodes, self.pool_depth, dims=5)
-        self.conv2 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth)
-        self.pool2 = Pool(self.hidden_dim, self.hidden_dim, self.pool2_nodes, self.pool_depth)
-        # self.conv3 = ResConvBlock(self.hidden_dim, self.hidden_dim, self.hidden_dim, self.depth,
-        #                           first_conv_layer=partial_egat)
-        # self.pool3 = Pool(self.hidden_dim, self.hidden_dim, self.pool3_nodes, self.pool_depth)
-
-        self.final_fc = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(self.pool2_nodes * self.hidden_dim, 50),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(50, 2)
-        )
-
-    def forward(self, batch):
-        if type(batch) == list:  # Data list
-            batch = Batch.from_data_list(batch)
-
-        x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
-        edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
-
-        out_all = list()
-        # conv-pool-conv
-        out_all.append(self.conv1(x, edge_index, edge_attr, batch.batch.to(self.device)))
-        p1_x, p1_ei, p1_ea, p1_batch, p1_el, p1_ml, p1_ll = self.pool1(x, edge_index, edge_attr, batch,
-                                                                       out_all[-1][-1])
-        out_all.append(self.conv2(p1_x, p1_ei, p1_ea, p1_batch.batch.to(self.device)))
-        p2_x, p2_ei, p2_ea, p2_batch, p2_el, p2_ml, p2_ll = self.pool2(p1_x, p1_ei, p1_ea, p1_batch,
-                                                                       out_all[-1][-1])
-        # out_all.append(self.conv3(p2_x, p2_ei, p2_ea, p2_batch.batch.to(self.device)))
-        # p3_x, p3_ei, p3_ea, p3_batch, p3_el, p3_ml, p3_ll = self.pool3(p2_x, p2_ei, p2_ea, p2_batch,
-        #                                                                out_all[-1][-1])
-
-        out_all = sum(out_all, [])  # !!!?
-
-        pooled_out_all = p2_x.reshape(batch.num_graphs, -1)
-        # print(p3_x[:, 0])
-
-        reg = p1_ml + p1_el + p2_ml + p2_el
-        # reg = torch.tensor([0.], device=self.device)
-        reg = reg.unsqueeze(0)
-
-        fc_out = self.final_fc(pooled_out_all)
-
-        return fc_out, reg
-
-    @property
-    def device(self):
-        return self.conv1.device
 
     @staticmethod
     def split_n(tensor, n):
@@ -287,7 +210,7 @@ if __name__ == '__main__':
     from utils import gaussian_fit
     from dataset import ABIDE
 
-    dataset = ABIDE(root='datasets/NYU', transform=z_score_norm_data)
+    dataset = ABIDE(root='datasets/NYU')
     model = Net()
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(10)])

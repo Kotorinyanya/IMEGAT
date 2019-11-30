@@ -9,6 +9,7 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 import numpy as np
 import socket
 from datetime import datetime
+import networkx as nx
 
 
 def use_logging(level='info'):
@@ -52,7 +53,7 @@ def add_self_loops_with_edge_attr(edge_index, edge_attr, num_nodes=None):
     return edge_index, edge_attr
 
 
-def z_score_norm(tensor):
+def z_score_norm(tensor, mean=None, std=None):
     """
     Normalize a tensor with mean and standard deviation.
     Args:
@@ -61,8 +62,8 @@ def z_score_norm(tensor):
     Returns:
         Tensor: Normalized tensor.
     """
-    mean = tensor.mean(dim=0)
-    std = tensor.std(dim=0)
+    mean = tensor.mean(dim=0) if mean is None else mean
+    std = tensor.std(dim=0) if std is None else std
     std[std == 0] = 1e-6
     normed_tensor = (tensor - mean) / std
     return normed_tensor
@@ -71,6 +72,13 @@ def z_score_norm(tensor):
 def z_score_norm_data(data):
     data.x = z_score_norm(data.x)
     return data
+
+
+def log_along_dim(tensor, log_dim):
+    tensor[:, log_dim] = torch.log(tensor[:, log_dim])
+    tensor[tensor != tensor] = 0  # nan
+    tensor[tensor.eq(float('-inf'))] = 0  # -inf
+    return tensor
 
 
 def custom_norm(tensor):
@@ -82,10 +90,8 @@ def custom_norm(tensor):
     # missing value in dim 2
     tensor[:, 2][tensor[:, 2] == 0] = .9
     # log dim
-    dim = [0, 1, 2, 4, 6]
-    tensor[:, dim] = torch.log(tensor[:, dim])
-    tensor[tensor != tensor] = 0  # nan
-    tensor[tensor.eq(float('-inf'))] = 0  # -inf
+    log_dim = [0, 1, 2, 4, 6]
+    tensor = log_along_dim(tensor, log_dim)
     tensor = z_score_norm(tensor)
     return tensor
 
@@ -103,6 +109,26 @@ def new_ones(data):
 def gaussian_fit(data):
     data.x = data.x.normal_(mean=0, std=1)
     return data
+
+
+def norm_train_test(dataset, train_idx, test_idx):
+    tensor = dataset.data.x
+    # missing value in dim 2
+    tensor[:, 2][tensor[:, 2] == 0] = .9
+    # log along dim
+    tensor = log_along_dim(tensor, [0, 1, 2, 4, 6])
+    dataset.data.x = tensor
+
+    train_dataset = dataset.__indexing__(train_idx)
+    test_dataset = dataset.__indexing__(test_idx)
+
+    train_mean = train_dataset.data.x.mean(0)
+    train_std = train_dataset.data.x.std(0)
+
+    train_dataset.data.x = z_score_norm(train_dataset.data.x, train_mean, train_std)
+    test_dataset.data.x = z_score_norm(test_dataset.data.x, train_mean, train_std)
+
+    return train_dataset, test_dataset
 
 
 def doubly_stochastic_normalization_2d_tensor(adj):
@@ -170,7 +196,6 @@ def real_softmax(src, index, num_nodes=None):
 
 
 def norm_edge_attr(edge_index, num_nodes, edge_weight, type=1, improved=False, dtype=None):
-
     # fill_value = 1 if not improved else 2
     # edge_index, edge_weight = add_remaining_self_loops(
     #     edge_index, edge_weight, fill_value, num_nodes)
@@ -350,3 +375,17 @@ def adj_to_tg_batch(adj, detach_pool=False):
 
 def nan_or_inf(x):
     return torch.isnan(x).any() or x.eq(float('inf')).any() or x.eq(float('-inf')).any()
+
+
+def check_strongly_connected(adj):
+    G = nx.from_numpy_array(adj)
+    G = G.to_directed()
+    return nx.algorithms.components.is_strongly_connected(G)
+
+
+def fisher_z(adj):
+    return 0.5 * np.log((1 + adj) / (1 - adj))
+
+
+def to_distance(adj):
+    return 1 - np.sqrt((1 - adj) / 2)

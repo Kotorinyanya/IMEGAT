@@ -188,6 +188,7 @@ class ConvNPool(nn.Module):
                 self.in_channels, self.hidden_dim, dims=self.in_dims, att_dropout=0.)
         else:
             raise Exception("???")
+        self.bn = InstanceNorm(hidden_dim)
 
         # ResConv
         self.conv = ParallelResGraphConv(
@@ -196,7 +197,7 @@ class ConvNPool(nn.Module):
         # Pool
         if not self.no_pool:
             self.pool = Pool(
-                self.hidden_dim, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim, self.ml,
+                self.in_channels, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim, self.ml,
                 self.el, self.ll)
 
     def forward(self, x, edge_index, edge_attr, batch):
@@ -213,7 +214,8 @@ class ConvNPool(nn.Module):
         if not self.no_pool:
             # pool
             x1_to_pool = out_last
-            p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x1, alpha_index, alpha, x1_to_pool, batch)
+            x_in = torch.stack([x for _ in range(self.attention_dim)], dim=-1)
+            p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x_in, alpha_index, alpha, x1_to_pool, batch)
             return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
         else:
             # without pool

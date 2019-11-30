@@ -16,14 +16,14 @@ class Pool(nn.Module):
         self.dims = dims
         self.block_chunk_size = 2
         self.pool_nodes = pool_nodes
-        self.detach_pool = True  # detach adj
+        self.detach_pool = False  # detach adj
         self.conv_depth = depth
         self.pool_convs = ParallelResGraphConv(in_channels, hidden_dim, pool_nodes, dims=self.dims,
                                                depth=self.conv_depth)
         self.pool_fc = nn.ModuleList([nn.Sequential(
-            nn.Linear((hidden_dim * (self.conv_depth - 1) + pool_nodes), 100),
+            nn.Linear((hidden_dim * (self.conv_depth - 1) + pool_nodes), 50),
             nn.LeakyReLU(negative_slope=0.2),
-            nn.Linear(100, pool_nodes)
+            nn.Linear(50, pool_nodes)
         ) for _ in range(self.dims)])
 
         self.bn_x = nn.BatchNorm1d(hidden_dim)
