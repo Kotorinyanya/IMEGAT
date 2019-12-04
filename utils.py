@@ -209,8 +209,6 @@ def norm_edge_attr(edge_index, num_nodes, edge_weight, type=1, improved=False, d
     elif type == 2:
         deg_inv = deg.pow(-1)
         norm = deg_inv[row] * edge_weight
-    elif type == 3:
-        norm = edge_weight
 
     return edge_index, norm
 
@@ -265,7 +263,7 @@ def from_3d_tensor_adj(adj):
     """
     assert adj.dim() == 3
     # return list(zip(*[from_2d_tensor_adj(adj[k]) for k in range(adj.shape[0])]))
-    edge_index = adj.nonzero()[:, 1:].unique(dim=0).t()  # make sure edge_index is same along axises
+    edge_index = adj.nonzero()[:, 1:].unique(dim=0).t().detach()  # make sure edge_index is same along axises
     row, col = edge_index
     edge_weight = adj.permute(1, 2, 0)[row, col]
     return edge_index, edge_weight

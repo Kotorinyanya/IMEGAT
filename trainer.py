@@ -145,9 +145,10 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.999),
                                       eps=1e-08, weight_decay=weight_decay, amsgrad=False)
-        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
-        scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=8, total_epoch=10,
-                                                  after_scheduler=scheduler_cosine)
+        scheduler_reduce = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.1)
+        scheduler = GradualWarmupScheduler(optimizer, multiplier=8, total_epoch=10,
+                                           after_scheduler=scheduler_reduce)
+        scheduler = scheduler_reduce
         # optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
         if ddp:
             model = nn.parallel.DistributedDataParallel(model.to(device_ids[0]), device_ids=device_ids)
@@ -160,9 +161,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
         if saved_model_path is not None:
             model.load_state_dict(torch.load(saved_model_path))
 
-        best_map, patience_counter, best_score = 0.0, 0, -np.inf
+        best_map, patience_counter, best_score = 0.0, 0, np.inf
         for epoch in tqdm_notebook(range(1, num_epochs + 1), desc='Epoch', leave=False):
             logs = {}
+
+            # scheduler.step(epoch=epoch, metrics=best_score)
 
             for phase in ['train', 'validation']:
 
@@ -181,13 +184,17 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                 epoch_yhat_0, epoch_yhat_1 = torch.tensor([]), torch.tensor([])
                 epoch_label, epoch_predicted = torch.tensor([]), torch.tensor([])
 
+                logging_hist = True if phase == 'train' else False  # once per epoch
                 for data_list in tqdm_notebook(dataloader, desc=phase, leave=False):
+                    # for logging
+                    model.logging_hist = logging_hist
 
                     # TODO: check devices
                     if dp:
                         data_list = to_cuda(data_list, (device_ids[0] if device_ids is not None else 'cuda'))
 
                     y_hat, reg = model(data_list)
+                    logging_hist = False
                     # y_hat = y_hat.reshape(batch_size, -1)
 
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
@@ -244,13 +251,13 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     writer.add_scalars('reg_loss'.format(phase),
                                        {'{}_reg_loss'.format(phase): epoch_reg_loss},
                                        epoch)
-                print(epoch_reg_loss)
-                writer.add_histogram('hist/{}_yhat_0'.format(phase),
-                                     epoch_yhat_0,
-                                     epoch)
-                writer.add_histogram('hist/{}_yhat_1'.format(phase),
-                                     epoch_yhat_1,
-                                     epoch)
+                # print(epoch_reg_loss)
+                # writer.add_histogram('hist/{}_yhat_0'.format(phase),
+                #                      epoch_yhat_0,
+                #                      epoch)
+                # writer.add_histogram('hist/{}_yhat_1'.format(phase),
+                #                      epoch_yhat_1,
+                #                      epoch)
 
                 # Save Model & Early Stopping
                 if phase == 'validation':
@@ -261,8 +268,8 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         best_map = accuracy
                         model_save_path = model_save_path + '-best'
 
-                    score = -epoch_nll_loss
-                    if score > best_score:
+                    score = epoch_nll_loss
+                    if score < best_score:
                         patience_counter = 0
                         best_score = score
                     else:
@@ -284,7 +291,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                                        {'{}_accuracy'.format(phase): best_map},
                                        epoch)
                     writer.add_scalars('best_nll_loss',
-                                       {'{}_nll_loss'.format(phase): -best_score},
+                                       {'{}_nll_loss'.format(phase): best_score},
+                                       epoch)
+
+                    writer.add_scalars('learning_rate',
+                                       {'learning_rate': scheduler.optimizer.param_groups[0]['lr']},
                                        epoch)
 
                     if patience_counter >= patience:
@@ -306,14 +317,13 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 
 if __name__ == "__main__":
-    from utils import z_score_norm_data, new_ones, custom_norm_data
     from dataset import ABIDE
     from model import Net
 
     dataset = ABIDE(root='datasets/NYU')
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=8, patience=200,
+    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=1, patience=200,
                            num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.1, n_splits=5,
-                           use_gpu=True, dp=True, ddp=False,
-                           device_ids=[1, 2, 3, 4], fold_seed=1234)
+                           use_gpu=True, dp=False, ddp=False,
+                           device_ids=[1, 2, 3, 4], cuda_device=1, fold_seed=1234)

@@ -119,6 +119,21 @@ def top_k_percent_adj(adj, k):
     return adj
 
 
+def statistic_of_node(adj):
+    import torch
+    from scipy.stats import skew
+    from scipy.stats import kurtosis
+    from utils import nan_or_inf
+
+    mean = torch.tensor(adj.mean(-1))
+    std = torch.tensor(adj.std(-1))
+    skewness = torch.tensor(skew(adj, axis=-1))
+    kurto = torch.tensor(kurtosis(adj, axis=-1))
+    assert nan_or_inf(kurto)
+    additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
+    return additional_feature
+
+
 def fetch_url(proxies, out_dir, s3_prefix, s3_path):
     rel_path = s3_path.lstrip(s3_prefix)
     download_file = os.path.join(out_dir, rel_path)

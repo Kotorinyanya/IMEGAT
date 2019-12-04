@@ -1,6 +1,7 @@
 # from torch_geometric.nn import GCNConv
 from functools import partial
 from module import *
+from nilearn.plotting import plot_matrix
 
 
 # noinspection PyTypeChecker
@@ -11,12 +12,13 @@ class Net(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(Net, self).__init__()
 
+        self.writer = writer
         self.in_channels = 7
         self.hidden_dim = 30
         self.in_nodes = 360
         # self.pool_percent = 0.25
-        self.pool1_nodes = 6
-        # self.pool2_nodes = 10
+        self.pool1_nodes = 22
+        self.pool2_nodes = 5
         # self.pool3_nodes = 6
         self.first_attention_heads = 5
         self.conv_depth = 3
@@ -26,6 +28,8 @@ class Net(nn.Module):
         self.alpha_dim = self.first_attention_heads if self.concat else 1
         self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
+        self.logging_hist = True
+
         cnp_params = {"hidden_dim": self.hidden_dim,
                       "out_channels": self.hidden_dim,
                       "concat": self.concat,
@@ -33,21 +37,21 @@ class Net(nn.Module):
                       "conv_depth": self.conv_depth,
                       "pool_conv_depth": self.pool_conv_depth,
                       "ml": 0,
-                      "ll": 0}
+                      "ll": 0,
+                      "el": 0}
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
-                              pool_nodes=self.pool1_nodes,
+                              pool_nodes=self.pool2_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
-                              el=0,
                               **cnp_params)
         # self.conv2 = ConvNPool(in_channels=self.hidden_dim,
         #                        attention_heads=1,
         #                        in_dims=self.first_attention_heads,
         #                        no_pool=True,
         #                        **cnp_params)
-        # self.cnp3 = ConvNPool(in_channels=self.hidden_dim,
-        #                       pool_nodes=self.pool3_nodes,
+        # self.cnp2 = ConvNPool(in_channels=self.hidden_dim,
+        #                       pool_nodes=self.pool2_nodes,
         #                       attention_heads=1,
         #                       in_dims=self.first_attention_heads,
         #                       **cnp_params)
@@ -60,7 +64,7 @@ class Net(nn.Module):
         self.final_fc = nn.Sequential(
             # nn.BatchNorm1d(self.pool3_nodes * self.hidden_dim * 3),
             nn.Dropout(dropout),
-            nn.Linear(self.pool1_nodes * self.hidden_dim * self.alpha_dim * 1, 100),
+            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * 1, 100),
             nn.ReLU(),
             nn.Dropout(dropout),
             # nn.Linear(100, 100),
@@ -80,7 +84,7 @@ class Net(nn.Module):
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
         # conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
-        # cnp3_out_all, p3_x, p3_ei, p3_ea, p3_batch, p3_loss, p3_assignment = self.cnp3(p2_x, p2_ei, p2_ea, p2_batch)
+        # cnp2_out_all, p2_x, p2_ei, p2_ea, p2_batch, p2_loss, p2_assignment = self.cnp2(p1_x, p1_ei, p1_ea, p1_batch)
         reg = p1_loss
         reg = reg.unsqueeze(0)
 
@@ -102,6 +106,23 @@ class Net(nn.Module):
         # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
+
+        if self.logging_hist:
+            self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
+            # self.writer.add_histogram('alpha2', self.cnp2.alpha.detach().cpu().flatten())
+            # self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
+            # self.writer.add_histogram('p2_ea', p2_ea.detach().cpu().flatten())
+            # self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
+            # self.writer.add_histogram('p2_assignment', p2_assignment.detach().cpu().flatten())
+            adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
+            torch.save(adj_1, 'adj_1')
+            # adj_2 = batch_to_adj(self.cnp2.alpha_index, self.cnp2.alpha, self.pool1_nodes, num_graphs)
+            # fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
+            # fig_2 = plot_matrix(adj_2[0, 0].detach().cpu())
+            # fig_1.show()
+            # fig_2.show()
+            # self.writer.add_figure('alpha1', fig_1)
+            # self.writer.add_figure('alpha2', fig_2)
 
         return fc_out, reg
 

@@ -27,6 +27,7 @@ class Pool(nn.Module):
         ) for _ in range(self.dims)])
 
         self.bn_x = nn.BatchNorm1d(hidden_dim)
+        self.ins_norm_adj = nn.InstanceNorm2d(self.dims)
 
         # self.out_x_fc = nn.Sequential(
         #     nn.Linear(hidden_dim * self.dims, hidden_dim),
@@ -69,8 +70,13 @@ class Pool(nn.Module):
 
         pooled_x = pooled_x.permute(1, 2, 3, 0)
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-2], pooled_x.shape[-1])  # merge to batch
+
+        # norm
+        # pooled_adj = self.ins_norm_adj(pooled_adj.permute(1, 0, 2, 3)).permute(1, 0, 2, 3)
+        pooled_x = self.bn_x(pooled_x)
+
         # pooled_x /= (num_nodes / self.pool_nodes)  # normalize?
-        # pooled_adj /= (num_nodes / self.pool_nodes) ** 2  # normalize?
+        pooled_adj /= (num_nodes / self.pool_nodes) ** 2  # normalize?
 
         # loss for S
         loss = self.losses(pool_assignment, edge_index, edge_attr, adj)
@@ -79,9 +85,7 @@ class Pool(nn.Module):
         # pooled_edge_index, pooled_edge_attr, pooled_batch_mask = adj_to_batch(pooled_adj)
         pooled_edge_index, pooled_edge_attr, pooled_batch = adj_to_tg_batch(pooled_adj, self.detach_pool)
 
-        # normalize after pool
-        pooled_edge_index, pooled_edge_attr = norm_edge_attr(pooled_edge_index, pooled_x.shape[0], pooled_edge_attr)
-        pooled_x = self.bn_x(pooled_x)
+        # pooled_edge_index, pooled_edge_attr = norm_edge_attr(pooled_edge_index, pooled_x.shape[0], pooled_edge_attr)
 
         return pooled_x, pooled_edge_index, pooled_edge_attr, pooled_batch, loss, pool_assignment
 

@@ -1,3 +1,5 @@
+import logging
+
 import torch_geometric
 from nilearn.connectome import ConnectivityMeasure
 from nilearn.input_data import NiftiLabelsMasker
@@ -26,6 +28,7 @@ from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno
 
 from nilearn.plotting import plot_matrix
+from sir import sir_score_of_adj
 
 
 class ABIDE(InMemoryDataset):
@@ -34,7 +37,7 @@ class ABIDE(InMemoryDataset):
                  transform=None,
                  resample_ts=False,
                  transform_edge=None,
-                 use_edge_weight_as_node_feature=True,
+                 additional_node_feature_func=None,
                  threshold=None,
                  atlas='HCPMMP1',
                  site='NYU',
@@ -47,8 +50,8 @@ class ABIDE(InMemoryDataset):
         :param name: ABIDE
         :param transform: transform at run
         :param resample_ts: bool, for data augmentation
-        :param transform_edge: bool, positive transform of edges
-        :param use_edge_weight_as_node_feature: bool
+        :param transform_edge: function
+        :param additional_node_feature_func: function
         :param threshold: float or int
         :param atlas: str
         :param site: str
@@ -59,7 +62,7 @@ class ABIDE(InMemoryDataset):
         :param mean_fd_thresh: float
         """
         self.threshold = threshold
-        self.use_edge_weight_as_node_feature = use_edge_weight_as_node_feature
+        self.additional_node_feature_func = additional_node_feature_func
         self.atlas = atlas
         self.transform_edge = transform_edge
         self.resample_ts = resample_ts
@@ -279,14 +282,8 @@ class ABIDE(InMemoryDataset):
                 connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
 
                 for adj in connectivity_matrix_list:
-                    # concat statistics of adj to node feature
-                    if self.use_edge_weight_as_node_feature:
-                        mean = torch.tensor(adj.mean(-1))
-                        std = torch.tensor(adj.std(-1))
-                        skewness = torch.tensor(skew(adj, axis=-1))
-                        kurto = torch.tensor(kurtosis(adj, axis=-1))
-                        # assert nan_or_inf(kurto)
-                        additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
+                    if self.additional_node_feature_func is not None:
+                        additional_feature = self.additional_node_feature_func(adj)
                         node_features = torch.cat([node_features, additional_feature], dim=-1)
                     # transform adj
                     np.fill_diagonal(adj, 0)  # remove self-loop for transform
@@ -304,6 +301,7 @@ class ABIDE(InMemoryDataset):
                     data.num_nodes = data.x.shape[0]
                     data_list.append(data)
             except:
+                logging.warning("failed at subject {}".format(subject))
                 failed_subject_list.append(subject)
         print("failed_subject_list", failed_subject_list)
         self.data, self.slices = self.collate(data_list)
@@ -312,8 +310,9 @@ class ABIDE(InMemoryDataset):
 
 if __name__ == '__main__':
     abide = ABIDE(root='datasets/NYU',
-                  resample_ts=True, transform_edge=fisher_z,
-                  use_edge_weight_as_node_feature=False,
+                  resample_ts=True,
+                  transform_edge=fisher_z,
+                  # additional_node_feature_func=sir_score_of_adj,
                   threshold=None,
                   atlas='HCPMMP1')
     pass

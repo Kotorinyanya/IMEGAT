@@ -141,9 +141,9 @@ class ConvNPool(nn.Module):
                  att_dropout,
                  conv_depth,
                  pool_conv_depth,
-                 ml=1,
-                 el=1,
-                 ll=1,
+                 ml=0,
+                 el=0,
+                 ll=0,
                  pool_nodes=None,
                  no_pool=False):
         """
@@ -214,7 +214,7 @@ class ConvNPool(nn.Module):
         if not self.no_pool:
             # pool
             x1_to_pool = out_last
-            x_in = torch.stack([x for _ in range(self.attention_dim)], dim=-1)
+            x_in = torch.stack([x for _ in range(self.attention_dim)], dim=-1) if x.dim() == 2 else x
             p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x_in, alpha_index, alpha, x1_to_pool, batch)
             return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
         else:
@@ -226,6 +226,8 @@ class ConvNPool(nn.Module):
         return self.egat_conv.device
 
     def __repr__(self):
-        return '{}({}, {}, {}, attention_dim={}, concat={}, att_dropout={}, conv_depth={}, pool_conv_depth={})'.format(
-            self.__class__.__name__, self.in_channels, self.hidden_dim, self.out_channels, self.attention_dim,
+        return '{}({}, {}, {}, pool_nodes={} attention_dim={}, concat={}, att_dropout={}, ' \
+               'conv_depth={}, pool_conv_depth={})'.format(
+            self.__class__.__name__, self.in_channels, self.hidden_dim, self.out_channels, self.pool_nodes,
+            self.attention_dim,
             self.concat, self.att_dropout, self.conv_depth, self.pool_depth)
