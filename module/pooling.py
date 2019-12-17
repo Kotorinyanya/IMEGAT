@@ -8,8 +8,9 @@ EPS = 1e-15
 
 
 class Pool(nn.Module):
-    def __init__(self, in_channels, hidden_dim, pool_nodes, depth, dims, ml=1, el=1, ll=1):
+    def __init__(self, in_channels, hidden_dim, pool_nodes, depth, dims, ml=1, el=1, ll=1, beta=1):
         super(Pool, self).__init__()
+        self.beta = beta
         self.ll = ll
         self.el = el
         self.ml = ml
@@ -22,12 +23,8 @@ class Pool(nn.Module):
                                                depth=self.conv_depth)
         self.pool_fc = nn.ModuleList([nn.Sequential(
             nn.Linear((hidden_dim * (self.conv_depth - 1) + pool_nodes), 50),
-            nn.LeakyReLU(negative_slope=0.2),
             nn.Linear(50, pool_nodes)
         ) for _ in range(self.dims)])
-
-        self.bn_x = nn.BatchNorm1d(hidden_dim)
-        self.ins_norm_adj = nn.InstanceNorm2d(self.dims)
 
         # self.out_x_fc = nn.Sequential(
         #     nn.Linear(hidden_dim * self.dims, hidden_dim),
@@ -58,7 +55,7 @@ class Pool(nn.Module):
         # assignment = self.pool_fc(pool_conv_out_all)
         # softmax
         pool_assignment = assignment.reshape(self.dims, num_graphs, num_nodes, self.pool_nodes)
-        pool_assignment = torch.softmax(pool_assignment, dim=-1)
+        pool_assignment = torch.softmax(pool_assignment * self.beta, dim=-1)
 
         # perform pooling
         # pool_assignment = pool_assignment.detach() if self.detach_pool else pool_assignment
@@ -71,11 +68,7 @@ class Pool(nn.Module):
         pooled_x = pooled_x.permute(1, 2, 3, 0)
         pooled_x = pooled_x.reshape(-1, pooled_x.shape[-2], pooled_x.shape[-1])  # merge to batch
 
-        # norm
-        # pooled_adj = self.ins_norm_adj(pooled_adj.permute(1, 0, 2, 3)).permute(1, 0, 2, 3)
-        pooled_x = self.bn_x(pooled_x)
-
-        # pooled_x /= (num_nodes / self.pool_nodes)  # normalize?
+        pooled_x /= (num_nodes / self.pool_nodes)  # normalize?
         pooled_adj /= (num_nodes / self.pool_nodes) ** 2  # normalize?
 
         # loss for S

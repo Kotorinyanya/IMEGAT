@@ -6,13 +6,13 @@ import torch
 import torch.distributed as dist
 from torch_geometric.nn import DataParallel
 from boxx import timeit
-from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold
+from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold, StratifiedKFold
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm_notebook
 
-from utils import get_model_log_dir, to_cuda, norm_train_test
+from utils import get_model_log_dir, to_cuda, norm_train_val
 import time
 import numpy as np
 
@@ -70,13 +70,10 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     if use_gpu:
         torch.cuda.manual_seed_all(seed)
 
-    if ddp and not torch.distributed.is_initialized():  # initialize ddp
-        dist.init_process_group('nccl', init_method='tcp://localhost:{}'.format(ddp_port), world_size=1, rank=0)
-
     model_name = model_cls.__name__
 
     if not cuda_device:
-        if device_ids and (ddp or dp):
+        if device_ids and dp:
             device = device_ids[0]
         else:
             device = torch.device('cuda' if torch.cuda.is_available() and use_gpu else 'cpu')
@@ -84,12 +81,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
         device = cuda_device
 
     device_count = torch.cuda.device_count() if dp else 1
-    device_count = len(device_ids) if (device_ids is not None and (dp or ddp)) else device_count
-    if device_count > 1:
-        print("Let's use", device_count, "GPUs!")
+    device_count = len(device_ids) if (device_ids is not None and dp) else device_count
 
     batch_size = batch_size * device_count
 
+    # TensorBoard
     log_dir_base = get_model_log_dir(comment, model_name)
     if tb_service_loc is not None:
         print("TensorBoard available at http://{1}/#scalars&regexInput={0}".format(
@@ -97,16 +93,25 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     else:
         print("Please set up TensorBoard")
 
-    criterion = nn.CrossEntropyLoss()
+    # model
+    criterion = nn.NLLLoss()
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
-    folds, fold = GroupKFold(n_splits=n_splits), 0
+    # folds, fold = GroupKFold(n_splits=n_splits), 0
+    folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
     print(dataset.__len__())
 
-    for train_idx, test_idx in tqdm_notebook(folds.split(list(range(dataset.__len__())),
-                                                         list(range(dataset.__len__())),
-                                                         dataset.group_vector),
+    # all_idx = list(range(dataset.__len__()))
+    # if fold_seed:
+    #     import random
+    #     random.Random(fold_seed).shuffle(all_idx)
+    #     torch.manual_seed(seed)
+    #     np.random.seed(seed)
+    #     if use_gpu:
+    #         torch.cuda.manual_seed_all(seed)
+
+    for train_idx, val_idx in tqdm_notebook(folds.split(np.zeros(len(dataset)), dataset.data.y.numpy()),
                                              desc='models', leave=False):
         fold += 1
         liveloss = PlotLosses() if live_loss else None
@@ -123,7 +128,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         model = model_cls(writer, dropout=dropout)
 
-        train_dataset, test_dataset = norm_train_test(dataset, train_idx, test_idx)
+        train_dataset, val_dataset = norm_train_val(dataset, train_idx, val_idx)
 
         train_dataloader = DataLoader(train_dataset,
                                       shuffle=True,
@@ -131,7 +136,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                                       collate_fn=lambda data_list: data_list,
                                       num_workers=num_workers,
                                       pin_memory=pin_memory)
-        test_dataloader = DataLoader(test_dataset,
+        val_dataloader = DataLoader(val_dataset,
                                      shuffle=False,
                                      batch_size=batch_size,
                                      collate_fn=lambda data_list: data_list,
@@ -145,14 +150,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.999),
                                       eps=1e-08, weight_decay=weight_decay, amsgrad=False)
-        scheduler_reduce = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.1)
-        scheduler = GradualWarmupScheduler(optimizer, multiplier=8, total_epoch=10,
-                                           after_scheduler=scheduler_reduce)
-        scheduler = scheduler_reduce
+        # scheduler_reduce = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+        scheduler = GradualWarmupScheduler(optimizer, multiplier=10, total_epoch=5)
+        # scheduler = scheduler_reduce
         # optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-        if ddp:
-            model = nn.parallel.DistributedDataParallel(model.to(device_ids[0]), device_ids=device_ids)
-        elif dp and use_gpu:
+        if dp and use_gpu:
             model = model.cuda() if device_ids is None else model.to(device_ids[0])
             model = DataParallel(model, device_ids=device_ids)
         elif use_gpu:
@@ -174,7 +176,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     dataloader = train_dataloader
                 else:
                     model.eval()
-                    dataloader = test_dataloader
+                    dataloader = val_dataloader
 
                 # Logging
                 running_total_loss = 0.0
@@ -186,16 +188,12 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
                 logging_hist = True if phase == 'train' else False  # once per epoch
                 for data_list in tqdm_notebook(dataloader, desc=phase, leave=False):
-                    # for logging
-                    model.logging_hist = logging_hist
 
                     # TODO: check devices
                     if dp:
                         data_list = to_cuda(data_list, (device_ids[0] if device_ids is not None else 'cuda'))
 
                     y_hat, reg = model(data_list)
-                    logging_hist = False
-                    # y_hat = y_hat.reshape(batch_size, -1)
 
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
                     for data in data_list:
@@ -318,12 +316,12 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
 
 if __name__ == "__main__":
     from dataset import ABIDE
-    from model import Net
+    from model import *
 
-    dataset = ABIDE(root='datasets/NYU')
+    dataset = ABIDE(root='datasets/ALL')
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=1, patience=200,
-                           num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.1, n_splits=5,
-                           use_gpu=True, dp=False, ddp=False,
-                           device_ids=[1, 2, 3, 4], cuda_device=1, fold_seed=1234)
+    train_cross_validation(model, dataset, comment='test_net_5p', batch_size=8, patience=200,
+                           num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,
+                           use_gpu=True, dp=False, ddp=False, fold_no=1,
+                           device_ids=[1, 2, 3, 4], cuda_device=1, fold_seed=None)

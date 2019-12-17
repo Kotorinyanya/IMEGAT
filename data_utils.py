@@ -119,6 +119,18 @@ def top_k_percent_adj(adj, k):
     return adj
 
 
+def repermute(data_list, target_order):
+    import numpy as np
+    target_order = np.asarray(target_order)
+    new_data_list = []
+    for subject_id in target_order:
+        for data in data_list:
+            if str(data.subject_id) == subject_id:
+                new_data_list.append(data)
+
+    return new_data_list
+
+
 def statistic_of_node(adj):
     import torch
     from scipy.stats import skew
@@ -156,12 +168,13 @@ def fetch_url(proxies, out_dir, s3_prefix, s3_path):
     return download_file
 
 
-def download_abide(out_dir, site=None):
-    proxies = {'http': "socks5://192.168.192.128:1080",
-               'https': "socks5://192.168.192.128:1080"}  # huze
-
+def download_abide(out_dir, site=None, subject_ids_to_download=None,
+                   proxies=None):
+    # proxies = {'http': "socks5://192.168.192.128:1080",
+    #            'https': "socks5://192.168.192.128:1080"}
     # Init variables
     mean_fd_thresh = 0.2
+    # mean_fd_thresh = 1e5
     s3_prefix = 'https://s3.amazonaws.com/fcp-indi/data/Projects/ABIDE_Initiative'
     s3_pheno_path = '/'.join([s3_prefix, 'Phenotypic_V1_0b_preprocessed1.csv'])
     fs_file_list_path = 'fs_file_list.txt'
@@ -204,6 +217,7 @@ def download_abide(out_dir, site=None):
         try:
             # See if it was preprocessed
             row_file_id = cs_row[file_idx]
+            subject_id = row_file_id[-5:]
             # Read in participant info
             row_site = cs_row[site_idx]
             row_dx = cs_row[dx_idx]
@@ -213,16 +227,20 @@ def download_abide(out_dir, site=None):
             print(err_msg)
             continue
 
+        if subject_ids_to_download is not None:
+            if subject_id not in subject_ids_to_download:
+                continue
+
         # If the filename isn't specified, skip
         if row_file_id == 'no_filename':
             continue
         # If mean fd is too large, skip
-        if row_mean_fd >= mean_fd_thresh:
-            continue
+        # if row_mean_fd >= mean_fd_thresh:
+        #     continue
 
         # Test phenotypic criteria (three if's looks cleaner than one long if)
         # Test site
-        if site is not None and site.lower() != row_site.lower():
+        if site != 'ALL' and site.lower() != row_site.lower():
             continue
 
         # add functional to download
@@ -243,35 +261,24 @@ def download_abide(out_dir, site=None):
     download_func = partial(fetch_url, proxies, out_dir, s3_prefix)
     with Pool(os.cpu_count()) as pool:
         results = list(pool.imap_unordered(download_func, s3_paths, chunksize=100))
-    # total_num_files = len(s3_paths)
-    # for path_idx, s3_path in enumerate(s3_paths):
-    #     rel_path = s3_path.lstrip(s3_prefix)
-    #     download_file = os.path.join(out_dir, rel_path)
-    #     download_dir = os.path.dirname(download_file)
-    #     if not os.path.exists(download_dir):
-    #         os.makedirs(download_dir)
-    #     try:
-    #         if not os.path.exists(download_file):
-    #             print('Retrieving: {0}'.format(download_file))
-    #             request.urlretrieve(s3_path, download_file)
-    #             print('{0:3f}% percent complete'.format(100 * (float(path_idx + 1) / total_num_files)))
-    #         else:
-    #             print('File {0} already exists, skipping...'.format(download_file))
-    #     except Exception as exc:
-    #         print('There was a problem downloading {0}.\n Check input arguments and try again.'.format(s3_path))
 
     # Print all done
     print('Done!')
 
 
 def label_from_pheno(pheno_df, subject):
-    import torch
-    y = torch.from_numpy(
-        pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values)
-    # for class label
-    y[y == 1] = 0
-    y[y == 2] = 1
-    return y
+    import numpy as np
+    y = pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values.item() - 1
+    sex = pheno_df[pheno_df['FILE_ID'] == subject]['SEX'].values.item() - 1
+
+    iq = pheno_df[pheno_df['FILE_ID'] == subject]['FIQ'].values.item()
+    iq = np.nan if iq == -9999 or np.isnan(iq) else iq
+
+    site_id_string = pheno_df[pheno_df['FILE_ID'] == subject]['SITE_ID'].values.item()
+    site_id = np.where(pheno_df.SITE_ID.unique() == site_id_string)[0].item()
+
+    subject_id = pheno_df[pheno_df['FILE_ID'] == subject]['subject'].values.item()
+    return y, sex, iq, site_id, subject_id
 
 
 def chunks(l, n):
@@ -286,22 +293,8 @@ def process_fs_output(fs_subject_dir, sh_script_path):
     import os
     only_dirs = [f for f in os.listdir(fs_subject_dir) if osp.isdir(osp.join(fs_subject_dir, f))]
     subject_ids = [osp.basename(p) for p in only_dirs]
-    num_workers = os.cpu_count()
-    subject_chunks = chunks(subject_ids, num_workers)
-
-    # # save subject list chunks to file
-    # all_file_names = []
-    # for i, chunk in enumerate(subject_chunks):
-    #     file_basename = 'subject_list_{}'.format(i)
-    #     file_path = osp.join(fs_subject_dir, file_basename)
-    #     with open(file_path, 'w') as f:
-    #         for item in chunk:
-    #             f.write("%s\n" % item)
-    #     all_file_names.append(file_basename)
-    # with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
-    #     for item in all_file_names:
-    #         f.write("%s\n" % item)
-    with open(osp.join(fs_subject_dir, 'all_subject_list'), 'w') as f:
+    subject_ids_file_path = osp.join(fs_subject_dir, 'all_subject_list')
+    with open(subject_ids_file_path, 'w') as f:
         for item in subject_ids:
             if item[-1].isdigit() and item[0].isalpha():
                 f.write("%s\n" % item)
@@ -311,21 +304,16 @@ def process_fs_output(fs_subject_dir, sh_script_path):
     # os.environ["SUBJECT_DIR"] = fs_subject_dir
     # # run the script in parallel
     cmd = 'cd {} &&'.format(fs_subject_dir) + \
-          'cat all_subject_list | parallel bash ' + sh_script_path + \
-          ' -L {} -a HCPMMP1 -d {}_output -t YES "&>" {}.log'
-    # os.system(cmd)
-    merge_cmd = 'cd {};'.format(fs_subject_dir) + \
-                'mkdir all_output;' + \
-                'find -name "subject_list_*_output" -type d -print0 | xargs -0 -n 1 -I {} mv "{}" "all_output/{}";' + \
-                "find -name 'NYU*' -type d -exec sh -c 'mv {} ./$(basename {})' \;" + \
-                "find -name 'subject_list_*' -type d -exec sh -c 'rm -rf {}' \;"
+          'bash ' + sh_script_path + \
+          ' -L {} -a HCPMMP1 -d all_output'.format(subject_ids_file_path)  # `all_output` hardcoded
+    # os.system(cmd)  # it's dangerous to run parallel bash script in this way, require manual launching the script
 
     if osp.isdir(osp.join(fs_subject_dir, 'all_output')):
         return
     else:
-        raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd + '\n' + merge_cmd)
+        raise Exception("\n\nPlease run processing manually from here\n" + cp_cmd + '\n' + cmd + '\n')
 
 
 if __name__ == '__main__':
-    # download_abide('new_datasets/ALL')
-    process_fs_output('/data_57/huze/projects/IMEGAT/datasets/ALL/raw/Outputs/freesurfer/5.1', None)
+    download_abide('datasets/ALL')
+    # process_fs_output('/data_57/huze/projects/IMEGAT/datasets/ALL/raw/Outputs/freesurfer/5.1', None)

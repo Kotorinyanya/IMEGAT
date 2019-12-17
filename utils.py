@@ -111,7 +111,7 @@ def gaussian_fit(data):
     return data
 
 
-def norm_train_test(dataset, train_idx, test_idx):
+def norm_train_val(dataset, train_idx, test_idx):
     tensor = dataset.data.x
     # missing value in dim 2
     tensor[:, 2][tensor[:, 2] == 0] = .9
@@ -382,8 +382,30 @@ def check_strongly_connected(adj):
 
 
 def fisher_z(adj):
+    np.fill_diagonal(adj, 0)
     return 0.5 * np.log((1 + adj) / (1 - adj))
 
 
 def to_distance(adj):
     return 1 - np.sqrt((1 - adj) / 2)
+
+
+def drop_negative(adj):
+    return adj[adj >= 0]
+
+
+# def cv_split_group(all_indexes, n_split, group_vector, random_state=None):
+#     """
+#
+#     :param all_indexes:
+#     :param n_split:
+#     :param group_vector:
+#     :param random_state:
+#     :return:
+#     """
+#     if random_state:
+#         np.random.seed(random_state)
+#
+#     train_indexes, validation_indexes = [], []
+#
+#     np.random.choice(group_vector)
