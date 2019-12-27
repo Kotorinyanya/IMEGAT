@@ -69,6 +69,8 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     np.random.seed(seed)
     if use_gpu:
         torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     model_name = model_cls.__name__
 
@@ -99,20 +101,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
     # folds, fold = GroupKFold(n_splits=n_splits), 0
+    # iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.subject_id)
     folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
-    print(dataset.__len__())
+    iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy())
 
-    # all_idx = list(range(dataset.__len__()))
-    # if fold_seed:
-    #     import random
-    #     random.Random(fold_seed).shuffle(all_idx)
-    #     torch.manual_seed(seed)
-    #     np.random.seed(seed)
-    #     if use_gpu:
-    #         torch.cuda.manual_seed_all(seed)
-
-    for train_idx, val_idx in tqdm_notebook(folds.split(np.zeros(len(dataset)), dataset.data.y.numpy()),
-                                             desc='models', leave=False):
+    for train_idx, val_idx in tqdm_notebook(iter, desc='models', leave=False):
         fold += 1
         liveloss = PlotLosses() if live_loss else None
 
@@ -137,11 +130,11 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                                       num_workers=num_workers,
                                       pin_memory=pin_memory)
         val_dataloader = DataLoader(val_dataset,
-                                     shuffle=False,
-                                     batch_size=batch_size,
-                                     collate_fn=lambda data_list: data_list,
-                                     num_workers=num_workers,
-                                     pin_memory=pin_memory)
+                                    shuffle=False,
+                                    batch_size=batch_size,
+                                    collate_fn=lambda data_list: data_list,
+                                    num_workers=num_workers,
+                                    pin_memory=pin_memory)
 
         if fold == 1 or fold_no is not None:
             print(model)
@@ -318,7 +311,7 @@ if __name__ == "__main__":
     from dataset import ABIDE
     from model import *
 
-    dataset = ABIDE(root='datasets/ALL')
+    dataset = ABIDE(root='datasets/NYU')
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
     train_cross_validation(model, dataset, comment='test_net_5p', batch_size=8, patience=200,

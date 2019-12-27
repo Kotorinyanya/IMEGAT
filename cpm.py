@@ -7,7 +7,7 @@ from scipy import stats
 import torch
 from torch_geometric.utils import to_scipy_sparse_matrix
 from tqdm import tqdm
-from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold
+from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold, StratifiedKFold
 import sklearn
 from multiprocessing import Pool
 import os
@@ -90,29 +90,43 @@ def train_cpm(dataset, mask):
 def val_cpm(dataset, mask, model):
     edge_list, labels = get_edge_and_y(dataset)
     new_x = (edge_list * mask).sum(0)
-    prediction = model.model.predict(new_x.reshape(-1, 1))
+    prediction = model.model.predict_proba(new_x.reshape(-1, 1))
     return prediction
 
 
-def train_val(train_dataset, test_dataset, p_values, th):
+def get_y(arr):
+    y = np.zeros((arr.shape[0], arr.max() + 1))
+    y[arr == 1, 1] = 1
+    return y
+
+
+def train_val(train_dataset, test_dataset, p_values, th, model='cpm'):
     edge_list, labels = get_edge_and_y(train_dataset)
     mask = (p_values <= th).reshape(-1, 1)
 
     new_x = (edge_list * mask).sum(0)
 
-    model = train_cpm(train_dataset, mask)
-    predictions = val_cpm(test_dataset, mask, model)
+    if model == 'cpm':
+        model = train_cpm(train_dataset, mask)
+        val_predictions = val_cpm(test_dataset, mask, model)
+        train_predictions = model.model.predict_proba(new_x.reshape(-1, 1))
 
-    val_acc = sklearn.metrics.accuracy_score(test_dataset.data.y, predictions)
-    train_acc = model.model.score(new_x.reshape(-1, 1), train_dataset.data.y)
-    return train_acc, val_acc
+    if model == 'mlp':
+        pass
+
+    truth_train_y = train_dataset.data.y
+    truth_val_y = test_dataset.data.y
+
+    val_acc = sklearn.metrics.accuracy_score(truth_val_y, val_predictions.argmax(1))
+    train_acc = sklearn.metrics.accuracy_score(truth_train_y, train_predictions.argmax(1))
+    val_auc = sklearn.metrics.roc_auc_score(truth_val_y, val_predictions[:, 1])
+    train_auc = sklearn.metrics.roc_auc_score(truth_train_y, train_predictions[:, 1])
+    return train_acc, val_acc, train_auc, val_auc
 
 
-def get_p_values(dataset, folds):
+def get_p_values(dataset, iter):
     p_values = []
-    for train_idx, test_idx in tqdm(folds.split(list(range(dataset.__len__())),
-                                                list(range(dataset.__len__())),
-                                                dataset.group_vector),
+    for train_idx, test_idx in tqdm(iter,
                                     desc='models', leave=False):
         train_dataset = dataset.__indexing__(train_idx)
         edge_list, labels = get_edge_and_y(train_dataset)
@@ -123,32 +137,39 @@ def get_p_values(dataset, folds):
 
 def cv(dataset, ths):
     # folds = GroupShuffleSplit(n_splits=4, train_size=int(len(dataset)/2), test_size=int(len(dataset)/2))
-    folds, fold = GroupKFold(n_splits=5), 0
-    p_values = get_p_values(dataset, folds)
-
+    folds, fold = StratifiedKFold(n_splits=10), 0
+    # p_values = get_p_values(dataset, iter)
+    import torch
+    p_values = torch.load('p')
     rep_dict = {}
     for th in ths:
         fold = 0
-        train_accs, val_accs = [], []
-        for train_idx, test_idx in tqdm(folds.split(list(range(dataset.__len__())),
-                                                    list(range(dataset.__len__())),
-                                                    dataset.group_vector),
+        train_accs, val_accs, train_aucs, val_aucs = [], [], [], []
+        iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy())
+        for train_idx, test_idx in tqdm(iter,
                                         desc='models', leave=False):
             train_dataset = dataset.__indexing__(train_idx)
             test_dataset = dataset.__indexing__(test_idx)
             p_value_arr = p_values[fold]
             fold += 1
 
-            train_acc, val_acc = train_val(train_dataset, test_dataset, p_value_arr, th)
+            train_acc, val_acc, train_auc, val_auc = train_val(train_dataset, test_dataset, p_value_arr, th)
             #         print(train_acc, val_acc)
             train_accs.append(train_acc)
             val_accs.append(val_acc)
-        print(train_accs, val_accs)
+            train_aucs.append(train_auc)
+            val_aucs.append(val_auc)
+        print(train_accs, val_accs, train_aucs, val_aucs)
         train_accs = np.asarray(train_accs)
         val_accs = np.asarray(val_accs)
+        train_aucs = np.asarray(train_aucs)
+        val_aucs = np.asarray(val_aucs)
         rep_train_acc = (train_accs.mean(), train_accs.std())
         rep_val_acc = (val_accs.mean(), val_accs.std())
-        rep_dict[th] = (rep_train_acc, rep_val_acc)
+        rep_train_auc = (train_aucs.mean(), train_auc.std())
+        rep_val_auc = (val_aucs.mean(), val_aucs.std())
+        rep_dict[th] = (rep_train_acc, rep_val_acc, rep_train_auc, rep_val_auc)
+        print(rep_dict)
 
     return rep_dict
 
@@ -156,7 +177,7 @@ def cv(dataset, ths):
 if __name__ == '__main__':
     from dataset import ABIDE
 
-    dataset = ABIDE(root='datasets/NYU')
+    dataset = ABIDE(root='datasets/ALL')
 
     ths = []
     for i in range(10):

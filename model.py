@@ -18,7 +18,7 @@ class Net(nn.Module):
         self.in_nodes = 360
         # self.pool_percent = 0.25
         self.pool1_nodes = 22
-        self.pool2_nodes = 4
+        self.pool2_nodes = 5
         # self.pool3_nodes = 6
         self.first_attention_heads = 5
         self.conv_depth = 3
@@ -62,11 +62,11 @@ class Net(nn.Module):
         #     InstanceNorm(self.hidden_dim)
         # ])
 
+        # self.alpha_conv_weight = Parameter(torch.ones(self.alpha_dim, 1) / self.alpha_dim)
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * self.conv_depth, 50),
-            nn.Sigmoid(),
-            nn.Dropout(dropout),
+            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * 1, 50),
+            nn.ReLU(),
             nn.Linear(50, 2),
             nn.LogSoftmax(dim=-1)
         )
@@ -81,9 +81,11 @@ class Net(nn.Module):
 
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
+        # p1_x = self.cnp1(x, edge_index, edge_attr, batch)
         # conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
         # cnp2_out_all, p2_x, p2_ei, p2_ea, p2_batch, p2_loss, p2_assignment = self.cnp2(p1_x, p1_ei, p1_ea, p1_batch)
         reg = p1_loss
+        # reg = torch.tensor(0.).to(self.device)
         reg = reg.unsqueeze(0)
 
         # x1 = p3_assignment.transpose(-2, -1).detach() @ \
@@ -103,6 +105,9 @@ class Net(nn.Module):
         #     all_pooled_x[i] = x.reshape(num_graphs, -1)
         # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
+        p1_x = p1_x.reshape(num_graphs, self.pool2_nodes, self.hidden_dim, self.alpha_dim)
+        # p1_x = p1_x.max(dim=1)[0]  # max pooling
+        # # p1_x = p1_x @ self.alpha_conv_weight
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
         if self.logging_hist:
@@ -133,9 +138,9 @@ class Net(nn.Module):
         return tensor.reshape(n, int(tensor.shape[0] / n), tensor.shape[1])
 
 
-class ResGCN_Pool(nn.Module):
+class ResGCN(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
-        super(ResGCN_Pool, self).__init__()
+        super(ResGCN, self).__init__()
 
         self.in_channels = 7
         self.hidden_dim = 30
@@ -200,10 +205,11 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
 
         self.fc = nn.Sequential(
-            nn.Linear(360 * 360 + 360 * 7, 50),
+            nn.Linear(360 * 360 + 7 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2),
+            nn.LogSoftmax(),
         )
 
     def forward(self, batch):
@@ -236,8 +242,8 @@ if __name__ == '__main__':
     from dataset import ABIDE
 
     dataset = ABIDE(root='datasets/NYU')
-    model = MLP()
+    model = Net()
     data = dataset.__getitem__(0)
-    batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(10)])
+    batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(2)])
     model(batch)
     pass
