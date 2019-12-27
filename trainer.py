@@ -323,7 +323,7 @@ if __name__ == "__main__":
     dataset = ABIDE(root='datasets/NYU')
     # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
     model = Net
-    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=1, patience=200,
+    train_cross_validation(model, dataset, comment='test_net_6p', batch_size=8, patience=200,
                            num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.1, n_splits=5,
-                           use_gpu=True, dp=False, ddp=False,
+                           use_gpu=True, dp=True, ddp=False,
                            device_ids=[1, 2, 3, 4], cuda_device=1, fold_seed=1234)

@@ -107,15 +107,15 @@ class Net(nn.Module):
 
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
-        if self.logging_hist:
-            self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
+        # if self.logging_hist:
+            # self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
             # self.writer.add_histogram('alpha2', self.cnp2.alpha.detach().cpu().flatten())
             # self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
             # self.writer.add_histogram('p2_ea', p2_ea.detach().cpu().flatten())
             # self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
             # self.writer.add_histogram('p2_assignment', p2_assignment.detach().cpu().flatten())
-            adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
-            torch.save(adj_1, 'adj_1')
+            # adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
+            # torch.save(adj_1, 'adj_1')
             # adj_2 = batch_to_adj(self.cnp2.alpha_index, self.cnp2.alpha, self.pool1_nodes, num_graphs)
             # fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
             # fig_2 = plot_matrix(adj_2[0, 0].detach().cpu())
