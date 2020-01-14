@@ -144,6 +144,7 @@ class ConvNPool(nn.Module):
                  ml=0,
                  el=0,
                  ll=0,
+                 beta=1,
                  pool_nodes=None,
                  no_pool=False):
         """
@@ -162,6 +163,7 @@ class ConvNPool(nn.Module):
         :param el: c for entropy loss, large c for a hard pooling, small c for soft pooling
         """
         super(ConvNPool, self).__init__()
+        self.beta = beta
         self.ll = ll
         self.no_pool = no_pool
         self.el = el
@@ -198,7 +200,7 @@ class ConvNPool(nn.Module):
         if not self.no_pool:
             self.pool = Pool(
                 self.in_channels, self.hidden_dim, self.pool_nodes, self.pool_depth, self.attention_dim, self.ml,
-                self.el, self.ll)
+                self.el, self.ll, self.beta)
 
     def forward(self, x, edge_index, edge_attr, batch):
 

@@ -14,11 +14,11 @@ class Net(nn.Module):
 
         self.writer = writer
         self.in_channels = 7
-        self.hidden_dim = 30
+        self.hidden_dim = 10
         self.in_nodes = 360
         # self.pool_percent = 0.25
         self.pool1_nodes = 22
-        self.pool2_nodes = 5
+        self.pool2_nodes = 4
         # self.pool3_nodes = 6
         self.first_attention_heads = 5
         self.conv_depth = 3
@@ -28,7 +28,7 @@ class Net(nn.Module):
         self.alpha_dim = self.first_attention_heads if self.concat else 1
         self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
-        self.logging_hist = True
+        self.logging_hist = False
 
         cnp_params = {"hidden_dim": self.hidden_dim,
                       "out_channels": self.hidden_dim,
@@ -44,6 +44,7 @@ class Net(nn.Module):
                               pool_nodes=self.pool2_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
+                              beta=2,
                               **cnp_params)
         # self.conv2 = ConvNPool(in_channels=self.hidden_dim,
         #                        attention_heads=1,
@@ -61,16 +62,13 @@ class Net(nn.Module):
         #     InstanceNorm(self.hidden_dim)
         # ])
 
+        # self.alpha_conv_weight = Parameter(torch.ones(self.alpha_dim, 1) / self.alpha_dim)
         self.final_fc = nn.Sequential(
-            # nn.BatchNorm1d(self.pool3_nodes * self.hidden_dim * 3),
             nn.Dropout(dropout),
-            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * 1, 100),
+            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            # nn.Linear(100, 100),
-            # nn.ReLU(),
-            # nn.Dropout(dropout),
-            nn.Linear(100, 2),
+            nn.Linear(50, 2),
+            nn.LogSoftmax(dim=-1)
         )
 
     def forward(self, batch):
@@ -83,9 +81,11 @@ class Net(nn.Module):
 
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
+        # p1_x = self.cnp1(x, edge_index, edge_attr, batch)
         # conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
         # cnp2_out_all, p2_x, p2_ei, p2_ea, p2_batch, p2_loss, p2_assignment = self.cnp2(p1_x, p1_ei, p1_ea, p1_batch)
         reg = p1_loss
+        # reg = torch.tensor(0.).to(self.device)
         reg = reg.unsqueeze(0)
 
         # x1 = p3_assignment.transpose(-2, -1).detach() @ \
@@ -105,6 +105,9 @@ class Net(nn.Module):
         #     all_pooled_x[i] = x.reshape(num_graphs, -1)
         # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
+        p1_x = p1_x.reshape(num_graphs, self.pool2_nodes, self.hidden_dim, self.alpha_dim)
+        # p1_x = p1_x.max(dim=1)[0]  # max pooling
+        # # p1_x = p1_x @ self.alpha_conv_weight
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
         # if self.logging_hist:
@@ -139,27 +142,49 @@ class ResGCN(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(ResGCN, self).__init__()
 
-        self.in_channels = 11
-        self.hidden_dim = 30
+        self.writer = writer
+        self.in_channels = 7
+        self.hidden_dim = 100
         self.in_nodes = 360
-        self.first_layer_heads = 5
-        self.first_layer_concat = False
-        self.depth = 6
-        self.first_conv_out_size = self.hidden_dim * self.first_layer_heads \
-            if self.first_layer_concat else self.hidden_dim
+        # self.pool_percent = 0.25
+        self.pool1_nodes = 22
+        self.pool2_nodes = 4
+        # self.pool3_nodes = 6
+        self.first_attention_heads = 5
+        self.conv_depth = 3
+        self.pool_conv_depth = 3
+        self.att_dropout = 0.
+        self.concat = True
+        self.alpha_dim = self.first_attention_heads if self.concat else 1
+        self.first_conv_out_size = self.hidden_dim * self.alpha_dim
 
-        partial_egat = partial(EGATConv, heads=self.first_layer_heads, concat=self.first_layer_concat,
-                               att_dropout=dropout)
+        self.logging_hist = False
 
-        self.convs = ResConvBlock(self.in_channels, self.hidden_dim, self.hidden_dim, self.depth,
-                                  first_conv_layer=GraphConv, hidden_conv_layer=GraphConv, last_conv_layer=GraphConv)
+        cnp_params = {"hidden_dim": self.hidden_dim,
+                      "out_channels": self.hidden_dim,
+                      "concat": self.concat,
+                      "att_dropout": self.att_dropout,
+                      "conv_depth": self.conv_depth,
+                      "pool_conv_depth": self.pool_conv_depth,
+                      "ml": 0,
+                      "ll": 0,
+                      "el": 0}
 
+        self.cnp1 = ConvNPool(in_channels=self.in_channels,
+                              pool_nodes=self.pool2_nodes,
+                              attention_heads=self.first_attention_heads,
+                              in_dims=1,
+                              beta=2,
+                              no_pool=True,
+                              **cnp_params)
+
+        # self.alpha_conv_weight = Parameter(torch.ones(self.alpha_dim, 1) / self.alpha_dim)
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear((self.first_conv_out_size + self.hidden_dim * (self.depth - 1)) * 1, 50),
+            nn.Linear(2 * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(50, 2)
+            nn.Linear(50, 2),
+            nn.LogSoftmax(dim=-1)
         )
 
     def forward(self, batch):
@@ -168,19 +193,19 @@ class ResGCN(nn.Module):
 
         x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
+        num_graphs = batch.num_graphs
 
-        out_all = self.convs(x, edge_index, edge_attr, batch.batch.to(self.device))
-
-        # global pooling
-        global_pooled_out_all = [torch.max(self.split_n(out, batch.num_graphs), dim=1)[0] for out in out_all]
-        # global_pooled_out_all = [torch.mean(self.split_n(out, batch.num_graphs), dim=1) for out in out_all]
-        global_pooled_out_all = torch.cat(global_pooled_out_all, dim=-1)
-
-        # reg = p1_el + p1_ml
-        reg = torch.tensor([0.], device=self.device)
+        # CNP
+        out = self.cnp1(x, edge_index, edge_attr, batch)
+        reg = torch.tensor(0.).to(self.device)
         reg = reg.unsqueeze(0)
 
-        fc_out = self.final_fc(global_pooled_out_all)
+        out = out.reshape(num_graphs, self.in_nodes, self.hidden_dim, self.alpha_dim)
+        out_max = out.max(dim=1)[0]  # pooling
+        out_min = out.min(dim=1)[0]
+        out = torch.cat([out_max, out_min], dim=-1)
+
+        fc_out = self.final_fc(out.reshape(num_graphs, -1))
 
         return fc_out, reg
 
@@ -190,7 +215,7 @@ class ResGCN(nn.Module):
 
     @property
     def device(self):
-        return self.convs.device
+        return self.cnp1.device
 
 
 class MLP(nn.Module):
@@ -199,26 +224,30 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
 
         self.fc = nn.Sequential(
-            nn.Linear(360 * 11, 32),
+            nn.Linear(360 * 360 + 7 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(32, 2)
+            nn.Linear(50, 2),
+            nn.LogSoftmax(),
         )
 
     def forward(self, batch):
         if type(batch) == list:  # Data list
             batch = Batch.from_data_list(batch)
-        x = batch.x.to(self.device).float()
-        # edge_attr = batch.edge_attr.to(self.device).float()
-        x = x.reshape(batch.num_graphs, -1)
-        # x = torch.cat([x, edge_attr.reshape(batch.num_graphs, -1)], dim=-1)
-        # x = edge_attr.reshape(batch.num_graphs, -1)
-        out = self.fc(x)
 
-        reg = torch.tensor([0.]).to(self.device)
+        x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
+        edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
+        num_graphs = batch.num_graphs
+        num_nodes = int(batch.num_nodes / batch.num_graphs)
+
+        adj = batch_to_adj(edge_index, edge_attr.reshape(-1, 1), num_nodes, num_graphs)
+
+        in_x = torch.cat([x.reshape(num_graphs, -1), adj.reshape(num_graphs, -1)], dim=-1)
+        # in_x = adj.reshape(num_graphs, -1)
+
+        out = self.fc(in_x)
+
+        reg = torch.tensor(0.).to(self.device)
 
         return out, reg
 
@@ -234,6 +263,6 @@ if __name__ == '__main__':
     dataset = ABIDE(root='datasets/NYU')
     model = Net()
     data = dataset.__getitem__(0)
-    batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(10)])
+    batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(2)])
     model(batch)
     pass

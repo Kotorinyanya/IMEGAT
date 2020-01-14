@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 # define compulsory and optional arguments
-while getopts ":L:T:f:l:a:d::m:t:s:" o; do
+while getopts ":L:a:d:" o; do
     case "${o}" in
         L)
             L=${OPTARG}
-            ;;
-        T)
-            T=${OPTARG}
             ;;
         a)
             a=${OPTARG}
@@ -164,84 +161,5 @@ proc_func(){
 export -f proc_func
 cat ${subject_list} | parallel proc_func
 
-## Take labels from fsaverage to subject space
-#for subject in `cat ${subject_list}`
-#do
-#    printf "\n         >>>>         PREPROCESSING ${subject}         <<<< \n"
-#    printf "\n         >>>>         ${subject} STARTED AT: $(date)\n\n"
-#
-#	mkdir -p ${output_dir}/${subject}
-#	mkdir -p ${output_dir}/${subject}/label
-#	sed '/_H_ROI/d' ${output_dir}/temp_${rand_id}/LUT_${annotation_file}.txt > ${output_dir}/${subject}/LUT_${annotation_file}.txt
-#
-#	if [[ -e $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot ]] && [[ -e $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot ]]
-#		then
-#		echo ">>>>	Annotation files lh.${subject}_${annotation_file}.annot and rh.${subject}_${annotation_file}.annot already exist in ${subject}/label. Won't perform transformations"
-#		else
-#
-#		rm -f ${output_dir}/${subject}/label2annot_${annotation_file}?h.log
-#		rm -f ${output_dir}/${subject}/log_label2label
-#
-#        if [[ ! -z "${T}" ]] ; then trgsubject=${T}; else trgsubject=${subject}; fi
-#
-#		# Convert labels to target space
-#		for label in `cat ${output_dir}/temp_${rand_id}/list_labels_${annotation_file}R`
-#			do echo "transforming ${label}"
-#			mri_label2label --srcsubject fsaverage --srclabel ${output_dir}/label/${label} --trgsubject ${trgsubject} --trglabel ${output_dir}/${subject}/label/${label}.label --regmethod surface --hemi rh >> ${output_dir}/${subject}/log_label2label
-#		done
-#		for label in `cat ${output_dir}/temp_${rand_id}/list_labels_${annotation_file}L`
-#			do echo "transforming ${label}"
-#			mri_label2label --srcsubject fsaverage --srclabel ${output_dir}/label/${label} --trgsubject ${trgsubject} --trglabel ${output_dir}/${subject}/label/${label}.label --regmethod surface --hemi lh >> ${output_dir}/${subject}/log_label2label
-#		done
-#
-#		mkdir -p ${output_dir}/temp_${rand_id}/${subject}
-#
-#		# Convert labels to annot (in subject space)
-#		rm -f ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_R
-#		rm -f ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_L
-#		for labelsR in `cat ${output_dir}/temp_${rand_id}/list_labels_${annotation_file}R`
-#			do printf " --l ${output_dir}/${subject}/label/${labelsR}" >> ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_R
-#		done
-#		for labelsL in `cat ${output_dir}/temp_${rand_id}/list_labels_${annotation_file}L`
-#			do if [ -e ${output_dir}/${subject}/label/${labelsL} ]
-#				then printf " --l ${output_dir}/${subject}/label/${labelsL}" >> ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_L
-#			fi
-#		done
-#
-#		mris_label2annot --s ${subject} --h rh `cat ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_R` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${rand_id}/colortab_${annotation_file}_R >> ${output_dir}/${subject}/label2annot_${annotation_file}rh.log
-#		mris_label2annot --s ${subject} --h lh `cat ${output_dir}/temp_${rand_id}/${subject}/temp_cat_${annotation_file}_L` --a ${subject}_${annotation_file} --ctab ${output_dir}/temp_${rand_id}/colortab_${annotation_file}_L >> ${output_dir}/${subject}/label2annot_${annotation_file}lh.log
-#
-#	fi
-#
-#	# Convert annot to volume
-#	rm -f ${output_dir}/${subject}/log_aparc2aseg
-#	mri_aparc2aseg --s ${subject} --o ${output_dir}/temp_${rand_id}/${annotation_file}.nii.gz  --annot ${subject}_${annotation_file} >> ${output_dir}/${subject}/log_aparc2aseg
-#
-##	# Remove hippocampal 'residue' --> voxels assigned to hippocampus in the HCPMMP1.0 parcellation will be very few, corresponding to vertices around the actual structure. These will be given the same voxel values as the hippocampi (as defined by the FS automatic segmentation): 17 (L) and 53 (R)
-##	l_hipp_index=`grep 'L_H_ROI.label' ${output_dir}/temp_${rand_id}/LUT_${annotation_file}.txt | cut -c-4`
-##	r_hipp_index=`grep 'R_H_ROI.label' ${output_dir}/temp_${rand_id}/LUT_${annotation_file}.txt | cut -c-4`
-##
-##	fslmaths ${output_dir}/temp_${rand_id}/${annotation_file}.nii.gz -thr $l_hipp_index -uthr $l_hipp_index ${output_dir}/temp_${rand_id}/l_hipp_HCP
-##	fslmaths ${output_dir}/temp_${rand_id}/l_hipp_HCP -bin -mul 17 ${output_dir}/temp_${rand_id}/l_hipp_FS
-##
-##	fslmaths ${output_dir}/temp_${rand_id}/${annotation_file}.nii.gz -thr $r_hipp_index -uthr $r_hipp_index -add ${output_dir}/temp_${rand_id}/l_hipp_HCP ${output_dir}/temp_${rand_id}/l_r_hipp_HCP
-##	fslmaths ${output_dir}/temp_${rand_id}/${annotation_file}.nii.gz -thr $r_hipp_index -uthr $r_hipp_index -bin -mul 53 -add ${output_dir}/temp_${rand_id}/l_hipp_FS ${output_dir}/temp_${rand_id}/l_r_hipp_FS
-##
-##	fslmaths ${output_dir}/temp_${rand_id}/${annotation_file}.nii.gz -sub ${output_dir}/temp_${rand_id}/l_r_hipp_HCP -add ${output_dir}/temp_${rand_id}/l_r_hipp_FS ${output_dir}/${subject}/${annotation_file}.nii.gz
-#
-#	# Get anatomical stats table
-#	if [[ ${get_anatomical_stats} == "YES" ]]
-#		then
-#		mkdir -p ${output_dir}/${subject}/stats
-#		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/lh.cortex.label -a $SUBJECTS_DIR/${subject}/label/lh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/lh.${annotation_file}.stats -b ${subject} lh white >> ${output_dir}/${subject}/log_mris_anatomical_stats_lh
-#		mris_anatomical_stats -th3 -mgz -cortex $SUBJECTS_DIR/${subject}/label/rh.cortex.label -a $SUBJECTS_DIR/${subject}/label/rh.${subject}_${annotation_file}.annot -f ${output_dir}/${subject}/stats/rh.${annotation_file}.stats -b ${subject} rh white >> ${output_dir}/${subject}/log_mris_anatomical_stats_rh
-#
-#	fi
-#
-#	if [[ ${colorlut_miss} == "YES" ]]; then printf "\n         >>>>         ERROR: FreeSurferColorLUT.txt file not found. Individual subcortical masks NOT created\n"; fi
-#
-#    printf "\n         >>>>         ${subject} ENDED AT: $(date)\n\n"
-#
-#done
 
 rm -r ${output_dir}/temp_${rand_id}

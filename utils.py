@@ -111,22 +111,45 @@ def gaussian_fit(data):
     return data
 
 
-def norm_train_test(dataset, train_idx, test_idx):
+def z_score_over_node(x, mean, std):
+    """
+
+    :param x: Tensor (num_graphs, num_nodes, num_features)
+    :param mean: Tensor (num_nodes, num_features)
+    :param std:
+    :return:
+    """
+    EPS = 1e-5
+    std += EPS
+
+    num_nodes = x.shape[1]
+    for i in range(num_nodes):
+        x[:, i, :] = (x[:, i, :] - mean[i]) / std[i]
+    return x
+
+
+def norm_train_val(dataset, train_idx, test_idx, num_nodes=360):
     tensor = dataset.data.x
     # missing value in dim 2
-    tensor[:, 2][tensor[:, 2] == 0] = .9
+    # tensor[:, 2][tensor[:, 2] == 0] = .99
     # log along dim
-    tensor = log_along_dim(tensor, [0, 1, 2, 4, 6])
+    tensor = log_along_dim(tensor, [6])
     dataset.data.x = tensor
 
     train_dataset = dataset.__indexing__(train_idx)
     test_dataset = dataset.__indexing__(test_idx)
+    feature_dim = train_dataset.data.x.shape[-1]
+    train_x = train_dataset.data.x.reshape(-1, num_nodes, feature_dim)
+    test_x = test_dataset.data.x.reshape(-1, num_nodes, feature_dim)
 
-    train_mean = train_dataset.data.x.mean(0)
-    train_std = train_dataset.data.x.std(0)
+    train_mean = train_x.mean(0)
+    train_std = test_x.std(0)
 
-    train_dataset.data.x = z_score_norm(train_dataset.data.x, train_mean, train_std)
-    test_dataset.data.x = z_score_norm(test_dataset.data.x, train_mean, train_std)
+    train_x = z_score_over_node(train_x, train_mean, train_std)
+    test_x = z_score_over_node(test_x, train_mean, train_std)
+
+    train_dataset.data.x = train_x.reshape(-1, feature_dim)
+    test_dataset.data.x = test_x.reshape(-1, feature_dim)
 
     return train_dataset, test_dataset
 
@@ -382,8 +405,30 @@ def check_strongly_connected(adj):
 
 
 def fisher_z(adj):
+    np.fill_diagonal(adj, 0)
     return 0.5 * np.log((1 + adj) / (1 - adj))
 
 
 def to_distance(adj):
     return 1 - np.sqrt((1 - adj) / 2)
+
+
+def drop_negative(adj):
+    return adj[adj >= 0]
+
+
+# def cv_split_group(all_indexes, n_split, group_vector, random_state=None):
+#     """
+#
+#     :param all_indexes:
+#     :param n_split:
+#     :param group_vector:
+#     :param random_state:
+#     :return:
+#     """
+#     if random_state:
+#         np.random.seed(random_state)
+#
+#     train_indexes, validation_indexes = [], []
+#
+#     np.random.choice(group_vector)
