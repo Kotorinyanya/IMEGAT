@@ -4,6 +4,17 @@ import requests
 import socket
 import socks
 import urllib.request as request
+import numpy as np
+import torch
+import pandas as pd
+from tqdm import tqdm
+from nilearn.input_data import NiftiLabelsMasker
+from nilearn.datasets import fetch_atlas_destrieux_2009
+from scipy.stats import skew
+from scipy.stats import kurtosis
+from utils import nan_or_inf
+import os.path as osp
+import os
 
 
 def find(pattern, path):
@@ -25,7 +36,6 @@ def first_uncommented(stats_file):
 
 
 def read_fs_stats_file(stats_file, atlas):
-    import pandas as pd
     """
     read anatomical properties computed by FreeSurfer,
     for only one hemisphere
@@ -54,7 +64,6 @@ def read_fs_stats(root, atlas):
     :param root:
     :return: res_dict {subject_id: (lh_df, rh_df)}
     """
-    from tqdm import tqdm
 
     if atlas == 'HCPMMP1':
         patten = '*HCPMMP1.stats'
@@ -81,8 +90,6 @@ def read_fs_stats(root, atlas):
 
 
 def extract_time_series(nii_file, atlas_nii_file=None):
-    from nilearn.input_data import NiftiLabelsMasker
-    from nilearn.datasets import fetch_atlas_destrieux_2009
     atlas_nii_file = fetch_atlas_destrieux_2009().maps if atlas_nii_file is None else atlas_nii_file
     masker = NiftiLabelsMasker(labels_img=atlas_nii_file, standardize=True,
                                memory='nilearn_cache', verbose=5)
@@ -90,22 +97,11 @@ def extract_time_series(nii_file, atlas_nii_file=None):
     return time_series
 
 
-def resample_temporal(time_series, time_window=90):
-    time_series_list = []
-    length = time_series.shape[0]
-    for start in range(0, length, time_window):
-        end = start + time_window
-        # next_end = end + time_window
-        if end >= length:
-            end = length - 1
-            time_series_list.append(time_series[start:end])
-            break
-        time_series_list.append(time_series[start:end])
-    return time_series_list
+def resample_temporal(time_series, n_split=2):
+    return np.array_split(time_series, n_split)
 
 
 def top_k_percent_adj(adj, k):
-    import numpy as np
     # remove self-connection
     np.fill_diagonal(adj, 0)
     # sort and get threshold
@@ -120,7 +116,6 @@ def top_k_percent_adj(adj, k):
 
 
 def repermute(data_list, target_order):
-    import numpy as np
     target_order = np.asarray(target_order)
     new_data_list = []
     for subject_id in target_order:
@@ -131,19 +126,38 @@ def repermute(data_list, target_order):
     return new_data_list
 
 
-def statistic_of_node(adj):
-    import torch
-    from scipy.stats import skew
-    from scipy.stats import kurtosis
-    from utils import nan_or_inf
-
+def get_adj_statistics(adj):
     mean = torch.tensor(adj.mean(-1))
     std = torch.tensor(adj.std(-1))
     skewness = torch.tensor(skew(adj, axis=-1))
     kurto = torch.tensor(kurtosis(adj, axis=-1))
-    assert nan_or_inf(kurto)
+    assert not nan_or_inf(kurto) and not nan_or_inf(skewness)
     additional_feature = torch.stack([mean, std, skewness, kurto], dim=-1)
     return additional_feature
+
+
+def H_operration(arr):
+    """
+    :type arr: List[int]
+    :rtype: int
+    """
+    if not arr.any():
+        return 0
+    return max([min(i + 1, c) for i, c in enumerate(sorted(arr, reverse=True))])
+
+
+def get_hs(adj, level=5):
+    """
+
+    :param adj: np.array, shape (num_nodes, num_nodes)
+    :return:
+    """
+    Hs = []
+    Hs.append(adj.sum(0))
+    for i in range(level):
+        H_i = np.asarray([H_operration(Hs[-1][adj[n].nonzero()[0]]) for n in range(adj.shape[0])])
+        Hs.append(H_i)
+    return torch.tensor(np.asarray(Hs)).t()
 
 
 def fetch_url(proxies, out_dir, s3_prefix, s3_path):
@@ -267,7 +281,6 @@ def download_abide(out_dir, site=None, subject_ids_to_download=None,
 
 
 def label_from_pheno(pheno_df, subject):
-    import numpy as np
     y = pheno_df[pheno_df['FILE_ID'] == subject]['DX_GROUP'].values.item() - 1
     sex = pheno_df[pheno_df['FILE_ID'] == subject]['SEX'].values.item() - 1
 
@@ -289,8 +302,6 @@ def chunks(l, n):
 
 
 def process_fs_output(fs_subject_dir, sh_script_path):
-    import os.path as osp
-    import os
     only_dirs = [f for f in os.listdir(fs_subject_dir) if osp.isdir(osp.join(fs_subject_dir, f))]
     subject_ids = [osp.basename(p) for p in only_dirs]
     subject_ids_file_path = osp.join(fs_subject_dir, 'all_subject_list')

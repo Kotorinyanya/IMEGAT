@@ -26,7 +26,7 @@ from scipy.stats import kurtosis, skew
 from utils import z_score_norm_data, positive_transform, nan_or_inf, check_strongly_connected, fisher_z, drop_negative
 
 from data_utils import read_fs_stats, extract_time_series, download_abide, \
-    process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno, repermute
+    process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno, repermute, get_adj_statistics, get_hs
 
 from nilearn.plotting import plot_matrix
 from sir import sir_score_of_adj
@@ -188,7 +188,11 @@ class ABIDE(InMemoryDataset):
                 correlation_measure = ConnectivityMeasure(kind='correlation')
                 time_series = masker.fit_transform(fmri_nii_file)
 
-                # handle broken file in ABIDE preprocessed
+                # 0 in regions
+                # for i in range(num_nodes):
+                #     assert np.any(time_series[:, i])
+
+                # handle broken file in ABIDE preprocessed filternoglobal
                 if subject == 'UM_1_0050302':
                     time_series = nilearn.signal.clean(time_series.transpose(), low_pass=0.1, high_pass=0.01, t_r=2
                                                        ).transpose()
@@ -199,17 +203,20 @@ class ABIDE(InMemoryDataset):
                 time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
                 # correlation form time series
                 connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
-                for adj in connectivity_matrix_list:
-                    if self.additional_node_feature_func is not None:
-                        additional_feature = self.additional_node_feature_func(adj)
-                        node_features = torch.cat([node_features, additional_feature], dim=-1)
+                for adj, time_series in zip(connectivity_matrix_list, time_series_list):
+                    time_series, raw_adj = torch.tensor(time_series), torch.tensor(adj)
+                    adj_statistics = get_adj_statistics(adj)
+                    padded_time_series = torch.zeros(200, 360)
+                    padded_time_series[:time_series.shape[0]] = time_series
+                    padded_time_series = padded_time_series.t()
+
                     # transform adj
                     # np.fill_diagonal(adj, 0)  # remove self-loop for transform
                     adj = self.transform_edge(adj) if self.transform_edge is not None else adj
                     # set a threshold for adj
                     if self.threshold is not None:
                         adj = top_k_percent_adj(adj, self.threshold)
-                        assert check_strongly_connected(adj) == True
+                        assert check_strongly_connected(adj)
                     # create torch_geometric Data
                     edge_index, edge_weight = from_scipy_sparse_matrix(coo_matrix(adj))
 
@@ -217,6 +224,10 @@ class ABIDE(InMemoryDataset):
                                 edge_index=edge_index,
                                 edge_attr=edge_weight,
                                 y=y)
+                    # additional node feature
+                    data.adj_statistics = adj_statistics
+                    data.time_series, data.raw_adj = padded_time_series, raw_adj
+                    # phenotypic data
                     data.sex, data.iq, data.site_id, data.subject_id = sex, iq, site_id, subject_id
                     data.num_nodes = data.x.shape[0]
                     data_list.append(data)
@@ -232,12 +243,21 @@ class ABIDE(InMemoryDataset):
         self.data, self.slices = self.collate(data_list)
         torch.save((self.data, self.slices), self.processed_paths[0])
 
+    def filter_by_site(self, site_name):
+        s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
+        pheno_df = pd.read_csv(s3_pheno_path)
+        site_id = np.where(pheno_df.SITE_ID.unique() == site_name)[0].item()
+
+        idx = torch.where(self.data.site_id == site_id)[0]
+
+        return self.__indexing__(idx)
+
 
 if __name__ == '__main__':
     abide = ABIDE(root='datasets/ALL',
-                  resample_ts=False,
+                  resample_ts=True,
                   transform_edge=None,
-                  # additional_node_feature_func=sir_score_of_adj,
+                  additional_node_feature_func=get_adj_statistics,
                   threshold=None,
                   site='ALL',
                   atlas='HCPMMP1')

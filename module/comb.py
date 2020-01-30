@@ -184,13 +184,14 @@ class ConvNPool(nn.Module):
             self.attention_dim = self.attention_heads if self.concat else 1
             self.egat_conv = EGATConv(
                 self.in_channels, self.hidden_dim, heads=self.attention_heads, concat=self.concat, att_dropout=0.)
+            # self.bn = InstanceNorm(self.hidden_dim * self.attention_dim)
         elif self.in_dims > 1 and self.attention_heads == 1:
             self.attention_dim = self.in_dims
             self.egat_conv = ParallelEGAT(
                 self.in_channels, self.hidden_dim, dims=self.in_dims, att_dropout=0.)
+            # self.bn = InstanceNorm(self.hidden_dim * self.attention_dim)
         else:
             raise Exception("???")
-        self.bn = InstanceNorm(hidden_dim)
 
         # ResConv
         self.conv = ParallelResGraphConv(
@@ -204,12 +205,16 @@ class ConvNPool(nn.Module):
 
     def forward(self, x, edge_index, edge_attr, batch):
 
+        # batch mask
+        batch_mask = batch.batch.to(self.device)
+
         # attention
-        x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr)
-        self.alpha, self.alpha_index = alpha, alpha_index
+        x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr, batch_mask)
+        self.alpha, self.alpha_index = alpha, alpha_index  # save attention
+        # x1 = self.bn(x1)
 
         # conv
-        conv_out = self.conv(x1, alpha_index, alpha, batch.batch.to(self.device))
+        conv_out = self.conv(x1, alpha_index, alpha, batch_mask)
         out_all = torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1)
         out_last = torch.cat([d[-1] for d in conv_out], dim=-1)
 

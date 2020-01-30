@@ -14,6 +14,7 @@ from torch_geometric.utils import softmax, remove_self_loops, add_self_loops, dr
 from torch_scatter import scatter_add
 
 from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf, add_self_loops_mul
+from .instance_norm import InstanceNorm
 
 
 class Attention(nn.Module):
@@ -30,7 +31,10 @@ class Attention(nn.Module):
         self.channels = channels
         self.att_drop = nn.Dropout(att_dropout)
         self.alpha_fc = nn.Sequential(
-            nn.Linear(2 * channels, self.heads),
+            nn.Linear(2 * channels, heads),
+            # nn.ReLU(),
+            # nn.BatchNorm1d(50),
+            # nn.Linear(50, heads)
         )
 
     def forward(self, x, edge_index, edge_attr):
@@ -68,7 +72,7 @@ class Attention(nn.Module):
 
     @property
     def device(self):
-        return self.att_weight.device
+        return self.alpha_fc[0].weight.device
 
     def __repr__(self):
         return '{}({}, heads={}, concat={}, att_dropout={})'.format(self.__class__.__name__, self.channels,
@@ -108,6 +112,8 @@ class EGATConv(nn.Module):
 
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
+        self.norm = InstanceNorm(out_channels)
+        # self.weight = nn.Linear(in_channels, out_channels)
         self.attention = Attention(out_channels, heads, concat, att_dropout)
 
         if bias:
@@ -122,9 +128,11 @@ class EGATConv(nn.Module):
         self.weight.data = nn.init.xavier_uniform_(self.weight.data, gain=nn.init.calculate_gain('relu'))
         zeros(self.bias)
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, x, edge_index, edge_attr, batch_mask):
 
         x = x @ self.weight
+        x = self.norm(x, batch_mask)
+        assert not nan_or_inf(x)
 
         alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 
@@ -135,7 +143,6 @@ class EGATConv(nn.Module):
         if self.bias is not None:
             out = out + self.bias
 
-        assert not nan_or_inf(out)
         return out, alpha, alpha_index
 
     @staticmethod

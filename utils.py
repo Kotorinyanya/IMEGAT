@@ -417,6 +417,10 @@ def drop_negative(adj):
     return adj[adj >= 0]
 
 
+def concat_node_feature(data):
+    data.x = torch.cat([data.x, data.adj_statistics, data.raw_adj], dim=-1)
+    return data
+
 # def cv_split_group(all_indexes, n_split, group_vector, random_state=None):
 #     """
 #

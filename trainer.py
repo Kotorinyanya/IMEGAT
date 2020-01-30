@@ -69,8 +69,8 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     np.random.seed(seed)
     if use_gpu:
         torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
 
     model_name = model_cls.__name__
 
@@ -103,7 +103,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     # folds, fold = GroupKFold(n_splits=n_splits), 0
     # iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.subject_id)
     folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
-    iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy())
+    iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy(), groups=dataset.data.subject_id)
 
     for train_idx, val_idx in tqdm_notebook(iter, desc='models', leave=False):
         fold += 1
@@ -312,9 +312,9 @@ if __name__ == "__main__":
     from model import *
 
     dataset = ABIDE(root='datasets/ALL')
-    # dataset.group_vector = sum([[0, 1] for _ in range(int(len(dataset.group_vector) / 2))], [])
+    dataset = dataset.filter_by_site('UCLA_1')
     model = Net
-    train_cross_validation(model, dataset, comment='test_net_5p', batch_size=8, patience=200,
+    train_cross_validation(model, dataset, comment='test', batch_size=8, patience=200,
                            num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,
                            use_gpu=True, dp=False, ddp=False, fold_no=1,
-                           device_ids=[1, 2, 3, 4], cuda_device=1, fold_seed=None)
+                           device_ids=[4], cuda_device=1, fold_seed=None)

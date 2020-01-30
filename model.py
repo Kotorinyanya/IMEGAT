@@ -13,15 +13,15 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.writer = writer
-        self.in_channels = 7
-        self.hidden_dim = 10
+        self.in_channels = 30
+        self.hidden_dim = 30
         self.in_nodes = 360
         # self.pool_percent = 0.25
         self.pool1_nodes = 22
-        self.pool2_nodes = 4
+        self.pool2_nodes = 5
         # self.pool3_nodes = 6
         self.first_attention_heads = 5
-        self.conv_depth = 3
+        self.conv_depth = 6
         self.pool_conv_depth = 3
         self.att_dropout = 0.
         self.concat = True
@@ -36,15 +36,22 @@ class Net(nn.Module):
                       "att_dropout": self.att_dropout,
                       "conv_depth": self.conv_depth,
                       "pool_conv_depth": self.pool_conv_depth,
-                      "ml": 0,
+                      "ml": 1,
                       "ll": 0,
-                      "el": 0}
+                      "el": 1}
+
+        self.first_fc = nn.ModuleList([
+            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(360, 10), nn.BatchNorm1d(10)),
+            # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
+        ])
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
                               pool_nodes=self.pool2_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
-                              beta=2,
+                              beta=1,
                               **cnp_params)
         # self.conv2 = ConvNPool(in_channels=self.hidden_dim,
         #                        attention_heads=1,
@@ -65,7 +72,7 @@ class Net(nn.Module):
         # self.alpha_conv_weight = Parameter(torch.ones(self.alpha_dim, 1) / self.alpha_dim)
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(self.pool2_nodes * self.hidden_dim * self.alpha_dim * 1, 50),
+            nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
             nn.Linear(50, 2),
             nn.LogSoftmax(dim=-1)
@@ -75,9 +82,15 @@ class Net(nn.Module):
         if type(batch) == list:  # Data list
             batch = Batch.from_data_list(batch)
 
-        x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
+        all_x = [batch.x.to(self.device),
+                 batch.adj_statistics.to(self.device),
+                 batch.raw_adj.to(self.device),]
+                 # batch.time_series.to(self.device)]
+        edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
-        num_graphs = batch.num_graphs
+        num_graphs, batch_mask = batch.num_graphs, batch.batch.to(self.device)
+
+        x = torch.cat([op(x) for op, x in zip(self.first_fc, all_x)], dim=-1)
 
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
@@ -106,26 +119,28 @@ class Net(nn.Module):
         # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
 
         p1_x = p1_x.reshape(num_graphs, self.pool2_nodes, self.hidden_dim, self.alpha_dim)
-        # p1_x = p1_x.max(dim=1)[0]  # max pooling
+        p1_x = p1_x.max(dim=1)[0]  # max pooling
         # # p1_x = p1_x @ self.alpha_conv_weight
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
         # if self.logging_hist:
-            # self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
-            # self.writer.add_histogram('alpha2', self.cnp2.alpha.detach().cpu().flatten())
-            # self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
-            # self.writer.add_histogram('p2_ea', p2_ea.detach().cpu().flatten())
-            # self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
-            # self.writer.add_histogram('p2_assignment', p2_assignment.detach().cpu().flatten())
-            # adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
-            # torch.save(adj_1, 'adj_1')
-            # adj_2 = batch_to_adj(self.cnp2.alpha_index, self.cnp2.alpha, self.pool1_nodes, num_graphs)
-            # fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
-            # fig_2 = plot_matrix(adj_2[0, 0].detach().cpu())
-            # fig_1.show()
-            # fig_2.show()
-            # self.writer.add_figure('alpha1', fig_1)
-            # self.writer.add_figure('alpha2', fig_2)
+        # self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
+        # self.writer.add_histogram('alpha2', self.cnp2.alpha.detach().cpu().flatten())
+        # self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
+        # self.writer.add_histogram('p2_ea', p2_ea.detach().cpu().flatten())
+        # self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
+        # self.writer.add_histogram('p2_assignment', p2_assignment.detach().cpu().flatten())
+        # adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
+        # torch.save(adj_1, 'adj_1')
+        # adj_2 = batch_to_adj(self.cnp2.alpha_index, self.cnp2.alpha, self.pool1_nodes, num_graphs)
+        # fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
+        # fig_2 = plot_matrix(adj_2[0, 0].detach().cpu())
+        # fig_1.show()
+        # fig_2.show()
+        # self.writer.add_figure('alpha1', fig_1)
+        # self.writer.add_figure('alpha2', fig_2)
+
+        assert not nan_or_inf(fc_out)
 
         return fc_out, reg
 
@@ -144,7 +159,7 @@ class ResGCN(nn.Module):
 
         self.writer = writer
         self.in_channels = 7
-        self.hidden_dim = 100
+        self.hidden_dim = 10
         self.in_nodes = 360
         # self.pool_percent = 0.25
         self.pool1_nodes = 22
@@ -223,8 +238,15 @@ class MLP(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(MLP, self).__init__()
 
+        self.first_fc = nn.ModuleList([
+            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(360, 10), nn.BatchNorm1d(10)),
+            # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
+        ])
+
         self.fc = nn.Sequential(
-            nn.Linear(360 * 360 + 7 * 360, 50),
+            nn.Linear(30 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2),
@@ -235,15 +257,17 @@ class MLP(nn.Module):
         if type(batch) == list:  # Data list
             batch = Batch.from_data_list(batch)
 
-        x, edge_index, edge_attr = batch.x.to(self.device), batch.edge_index.to(self.device), batch.edge_attr
+        all_x = [batch.x.to(self.device),
+                 batch.adj_statistics.to(self.device),
+                 batch.raw_adj.to(self.device),]
+                 # batch.time_series.to(self.device)]
+        edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
         num_graphs = batch.num_graphs
         num_nodes = int(batch.num_nodes / batch.num_graphs)
 
-        adj = batch_to_adj(edge_index, edge_attr.reshape(-1, 1), num_nodes, num_graphs)
-
-        in_x = torch.cat([x.reshape(num_graphs, -1), adj.reshape(num_graphs, -1)], dim=-1)
-        # in_x = adj.reshape(num_graphs, -1)
+        in_x = torch.cat([op(x) for op, x in zip(self.first_fc, all_x)], dim=-1)
+        in_x = in_x.reshape(num_graphs, -1)
 
         out = self.fc(in_x)
 
@@ -261,7 +285,8 @@ if __name__ == '__main__':
     from dataset import ABIDE
 
     dataset = ABIDE(root='datasets/NYU')
-    model = Net()
+    # model = Net()
+    model = MLP()
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(2)])
     model(batch)

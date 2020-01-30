@@ -67,6 +67,12 @@ def sir_simulation_rank_score_at_i(G, beta, gamma, num_iter, seed_node):
 
 
 def sir_score_of_adj(adj, num_iter=1000):
+    """
+
+    :param adj:
+    :param num_iter:
+    :return: shape (num_nodes, num_features)
+    """
     adj = np.abs(adj)
     G = init_graph(adj)
 
