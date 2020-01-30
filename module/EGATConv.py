@@ -32,9 +32,6 @@ class Attention(nn.Module):
         self.att_drop = nn.Dropout(att_dropout)
         self.alpha_fc = nn.Sequential(
             nn.Linear(2 * channels, heads),
-            # nn.ReLU(),
-            # nn.BatchNorm1d(50),
-            # nn.Linear(50, heads)
         )
 
     def forward(self, x, edge_index, edge_attr):
@@ -56,8 +53,6 @@ class Attention(nn.Module):
         # alpha = softmax(alpha, row)
         # edge_attr = torch.exp(edge_attr / 2 - 1)
         alpha = alpha * edge_attr.reshape(-1, 1).abs()
-
-        assert not nan_or_inf(alpha)
 
         # Dropout attentions
         if self.att_dropout > 0:
@@ -113,7 +108,6 @@ class EGATConv(nn.Module):
         self.weight = Parameter(
             torch.Tensor(in_channels, out_channels))
         self.norm = InstanceNorm(out_channels)
-        # self.weight = nn.Linear(in_channels, out_channels)
         self.attention = Attention(out_channels, heads, concat, att_dropout)
 
         if bias:
@@ -132,7 +126,6 @@ class EGATConv(nn.Module):
 
         x = x @ self.weight
         x = self.norm(x, batch_mask)
-        assert not nan_or_inf(x)
 
         alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 

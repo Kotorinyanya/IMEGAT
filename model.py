@@ -16,10 +16,7 @@ class Net(nn.Module):
         self.in_channels = 30
         self.hidden_dim = 30
         self.in_nodes = 360
-        # self.pool_percent = 0.25
-        self.pool1_nodes = 22
-        self.pool2_nodes = 5
-        # self.pool3_nodes = 6
+        self.pool1_nodes = 5
         self.first_attention_heads = 5
         self.conv_depth = 6
         self.pool_conv_depth = 3
@@ -48,28 +45,12 @@ class Net(nn.Module):
         ])
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
-                              pool_nodes=self.pool2_nodes,
+                              pool_nodes=self.pool1_nodes,
                               attention_heads=self.first_attention_heads,
                               in_dims=1,
                               beta=1,
                               **cnp_params)
-        # self.conv2 = ConvNPool(in_channels=self.hidden_dim,
-        #                        attention_heads=1,
-        #                        in_dims=self.first_attention_heads,
-        #                        no_pool=True,
-        #                        **cnp_params)
-        # self.cnp2 = ConvNPool(in_channels=self.hidden_dim,
-        #                       pool_nodes=self.pool2_nodes,
-        #                       attention_heads=1,
-        #                       in_dims=self.first_attention_heads,
-        #                       **cnp_params)
 
-        # self.ins_norm = nn.ModuleList([
-        #     InstanceNorm(self.hidden_dim),
-        #     InstanceNorm(self.hidden_dim)
-        # ])
-
-        # self.alpha_conv_weight = Parameter(torch.ones(self.alpha_dim, 1) / self.alpha_dim)
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
@@ -94,51 +75,22 @@ class Net(nn.Module):
 
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
-        # p1_x = self.cnp1(x, edge_index, edge_attr, batch)
-        # conv_out_2 = self.conv2(p1_x, p1_ei, p1_ea, p1_batch)
-        # cnp2_out_all, p2_x, p2_ei, p2_ea, p2_batch, p2_loss, p2_assignment = self.cnp2(p1_x, p1_ei, p1_ea, p1_batch)
-        reg = p1_loss
+        reg = p1_loss.unsqueeze(0)
         # reg = torch.tensor(0.).to(self.device)
-        reg = reg.unsqueeze(0)
 
-        # x1 = p3_assignment.transpose(-2, -1).detach() @ \
-        #      p2_assignment.transpose(-2, -1).detach() @ \
-        #      p1_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
-        #      (self.pool1_nodes / self.pool3_nodes)  # normalize
-        # x1 = x1.permute(1, 2, 3, 0)
-        # x2 = p3_assignment.transpose(-2, -1).detach() @ \
-        #      p2_x.reshape(num_graphs, -1, self.hidden_dim, self.alpha_dim).permute(3, 0, 1, 2) / \
-        #      (self.pool2_nodes / self.pool3_nodes)  # normalize
-        # x2 = x2.permute(1, 2, 3, 0)
-        # x3 = p3_x
-        # all_pooled_x = [x1, x2, x3]
-        # for i, x in enumerate(all_pooled_x):
-        #     x = x.reshape(x3.shape[0], -1)
-        #     x = self.ins_norm[i](x, p3_batch.batch.to(self.device))
-        #     all_pooled_x[i] = x.reshape(num_graphs, -1)
-        # all_pooled_x = torch.cat(all_pooled_x, dim=-1)
-
-        p1_x = p1_x.reshape(num_graphs, self.pool2_nodes, self.hidden_dim, self.alpha_dim)
+        p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
-        # # p1_x = p1_x @ self.alpha_conv_weight
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
 
-        # if self.logging_hist:
-        # self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
-        # self.writer.add_histogram('alpha2', self.cnp2.alpha.detach().cpu().flatten())
-        # self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
-        # self.writer.add_histogram('p2_ea', p2_ea.detach().cpu().flatten())
-        # self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
-        # self.writer.add_histogram('p2_assignment', p2_assignment.detach().cpu().flatten())
-        # adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
-        # torch.save(adj_1, 'adj_1')
-        # adj_2 = batch_to_adj(self.cnp2.alpha_index, self.cnp2.alpha, self.pool1_nodes, num_graphs)
-        # fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
-        # fig_2 = plot_matrix(adj_2[0, 0].detach().cpu())
-        # fig_1.show()
-        # fig_2.show()
-        # self.writer.add_figure('alpha1', fig_1)
-        # self.writer.add_figure('alpha2', fig_2)
+        if self.logging_hist:
+            self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
+            self.writer.add_histogram('p1_ea', p1_ea.detach().cpu().flatten())
+            self.writer.add_histogram('p1_assignment', p1_assignment.detach().cpu().flatten())
+            adj_1 = batch_to_adj(self.cnp1.alpha_index, self.cnp1.alpha, 360, num_graphs)
+            torch.save(adj_1, 'adj_1')
+            fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
+            fig_1.show()
+            self.writer.add_figure('alpha1', fig_1)
 
         assert not nan_or_inf(fc_out)
 
