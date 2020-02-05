@@ -421,18 +421,48 @@ def concat_node_feature(data):
     data.x = torch.cat([data.x, data.adj_statistics, data.raw_adj], dim=-1)
     return data
 
-# def cv_split_group(all_indexes, n_split, group_vector, random_state=None):
-#     """
-#
-#     :param all_indexes:
-#     :param n_split:
-#     :param group_vector:
-#     :param random_state:
-#     :return:
-#     """
-#     if random_state:
-#         np.random.seed(random_state)
-#
-#     train_indexes, validation_indexes = [], []
-#
-#     np.random.choice(group_vector)
+
+def one_site_cv_split(n_splits, y, groups, shuffle=False, random_state=None):
+    from sklearn.model_selection import StratifiedKFold
+    folds = StratifiedKFold(n_splits=n_splits, random_state=random_state, shuffle=shuffle)
+    iter = folds.split(np.zeros(len(y)), y, groups=groups)
+    return iter
+
+
+def multi_site_cv_split(y, site_ids, subject_ids, n_splits, random_state=None, shuffle=False):
+    """
+
+    :param y:
+    :param site_ids:
+    :param subject_ids:
+    :param n_splits:
+    :param random_state:
+    :param shuffle:
+    :return:
+    """
+
+    # cv for every site
+    all_site_cv_list = []
+    for site in site_ids.unique():
+        idx = (site_ids == site).nonzero()
+        site_y = y[idx]
+        site_group = subject_ids[idx]
+        site_iter = one_site_cv_split(n_splits, site_y, site_group, shuffle=shuffle, random_state=random_state)
+        site_cv_list = [(idx[train_idx].flatten().numpy(), idx[val_idx].flatten().numpy()) for train_idx, val_idx in
+                        site_iter]
+        all_site_cv_list.append(site_cv_list)
+
+    # merge list
+    temp = list(zip(*all_site_cv_list))
+    cv_list = [list(zip(*t)) for t in temp]
+    cv_list = [(np.concatenate(t), np.concatenate(v)) for t, v in cv_list]
+
+    return cv_list
+
+
+if __name__ == '__main__':
+    from dataset import ABIDE
+
+    datasets = ABIDE(root='datasets/ALL')
+    cv_list = multi_site_cv_split(datasets.data.y, datasets.data.site_id, datasets.data.subject_id, 10)
+    print()

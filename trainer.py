@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch_geometric.nn import DataParallel
 from boxx import timeit
 from sklearn.model_selection import KFold, GroupShuffleSplit, GroupKFold, StratifiedKFold
+from utils import multi_site_cv_split
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
@@ -99,13 +100,20 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     criterion = nn.NLLLoss()
 
     print("Training {0} {1} models for cross validation...".format(n_splits, model_name))
+    # 1
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
+    # 2
     # folds, fold = GroupKFold(n_splits=n_splits), 0
     # iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.subject_id)
-    folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
-    iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy(), groups=dataset.data.subject_id)
+    # 4
+    # folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
+    # iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy(), groups=dataset.data.subject_id)
+    # 5
+    fold = 0
+    iter = multi_site_cv_split(dataset.data.y, dataset.data.site_id, dataset.data.subject_id, 10,
+                               random_state=fold_seed, shuffle=True if fold_seed else False)
 
-    for train_idx, val_idx in tqdm_notebook(iter, desc='models', leave=False):
+    for train_idx, val_idx in tqdm_notebook(iter, desc='CV', leave=False):
         fold += 1
         liveloss = PlotLosses() if live_loss else None
 
@@ -191,8 +199,10 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
                     for data in data_list:
                         y = torch.cat([y, data.y.view(-1).to(device)])
+                        domain = torch.cat([y, data.site_id.view(-1).to(device)])
 
                     loss = criterion(y_hat, y)
+                    domain_loss = - criterion()
                     total_loss = (loss + reg).sum() if is_reg else loss.sum()
 
                     if phase == 'train':

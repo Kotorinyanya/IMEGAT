@@ -18,7 +18,7 @@ class Net(nn.Module):
         self.in_nodes = 360
         self.pool1_nodes = 5
         self.first_attention_heads = 5
-        self.conv_depth = 6
+        self.conv_depth = 3  # 6 for single-site, 3 for multi-site (faster)
         self.pool_conv_depth = 3
         self.att_dropout = 0.
         self.concat = True
@@ -201,7 +201,7 @@ class MLP(nn.Module):
             nn.Linear(30 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(50, 2),
+            nn.Linear(50, 20),
             nn.LogSoftmax(),
         )
 
