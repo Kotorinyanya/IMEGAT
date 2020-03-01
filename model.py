@@ -40,9 +40,14 @@ class Net(nn.Module):
         self.first_fc = nn.ModuleList([
             nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
             nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(360, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
+
+        # self.first_domain_fc = nn.Sequential(
+        #     nn.Linear(30 * self.in_nodes, 20),
+        #     nn.LogSoftmax(dim=-1)
+        # )
 
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
                               pool_nodes=self.pool1_nodes,
@@ -51,10 +56,25 @@ class Net(nn.Module):
                               beta=1,
                               **cnp_params)
 
+        # self.attention_domain_fc = nn.Sequential(
+        #     nn.Linear(360 ** 2, 20),
+        #     nn.LogSoftmax(dim=-1)
+        # )
+
+        self.domain_fc = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(50, 20),  # 20 sites
+            nn.LogSoftmax(dim=-1)
+        )
+
         self.final_fc = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(50, 2),
             nn.LogSoftmax(dim=-1)
         )
@@ -65,22 +85,28 @@ class Net(nn.Module):
 
         all_x = [batch.x.to(self.device),
                  batch.adj_statistics.to(self.device),
-                 batch.raw_adj.to(self.device),]
-                 # batch.time_series.to(self.device)]
+                 batch.raw_adj.to(self.device), ]
+        # batch.time_series.to(self.device)]
         edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
         num_graphs, batch_mask = batch.num_graphs, batch.batch.to(self.device)
 
         x = torch.cat([op(x) for op, x in zip(self.first_fc, all_x)], dim=-1)
 
+        # domain_x_out = self.first_domain_fc(x.reshape(num_graphs, -1))
+
         # CNP
         cnp1_out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, p1_assignment = self.cnp1(x, edge_index, edge_attr, batch)
         reg = p1_loss.unsqueeze(0)
         # reg = torch.tensor(0.).to(self.device)
 
+        # domain_alpha_out = self.attention_domain_fc(self.cnp1.alpha.reshape(num_graphs, -1))
+
         p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
+
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
+        domain_fc_out = self.domain_fc(p1_x.reshape(num_graphs, -1))
 
         if self.logging_hist:
             self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
@@ -94,7 +120,7 @@ class Net(nn.Module):
 
         assert not nan_or_inf(fc_out)
 
-        return fc_out, reg
+        return fc_out, domain_fc_out, reg
 
     @property
     def device(self):
@@ -211,8 +237,8 @@ class MLP(nn.Module):
 
         all_x = [batch.x.to(self.device),
                  batch.adj_statistics.to(self.device),
-                 batch.raw_adj.to(self.device),]
-                 # batch.time_series.to(self.device)]
+                 batch.raw_adj.to(self.device), ]
+        # batch.time_series.to(self.device)]
         edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
         num_graphs = batch.num_graphs

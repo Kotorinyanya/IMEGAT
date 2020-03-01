@@ -194,16 +194,20 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     if dp:
                         data_list = to_cuda(data_list, (device_ids[0] if device_ids is not None else 'cuda'))
 
-                    y_hat, reg = model(data_list)
+                    y_hat, domain_1, reg = model(data_list)
 
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
+                    domain_y = torch.tensor([], dtype=dataset.data.site_id.dtype, device=device)
                     for data in data_list:
                         y = torch.cat([y, data.y.view(-1).to(device)])
-                        domain = torch.cat([y, data.site_id.view(-1).to(device)])
+                        domain_y = torch.cat([domain_y, data.site_id.view(-1).to(device)])
 
                     loss = criterion(y_hat, y)
-                    domain_loss = - criterion()
-                    total_loss = (loss + reg).sum() if is_reg else loss.sum()
+                    domain_loss = -0.000001 * (criterion(domain_1, domain_y))
+                    print(loss, domain_loss)
+                    total_loss = (loss + domain_loss).sum()
+                    if is_reg:
+                        total_loss += reg.sum()
 
                     if phase == 'train':
                         # print(torch.autograd.grad(y_hat.sum(), model.saved_x, retain_graph=True))

@@ -243,13 +243,16 @@ class ABIDE(InMemoryDataset):
         self.data, self.slices = self.collate(data_list)
         torch.save((self.data, self.slices), self.processed_paths[0])
 
-    def filter_by_site(self, site_name):
+    def filter_by_site(self, site_names):
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
-        site_id = np.where(pheno_df.SITE_ID.unique() == site_name)[0].item()
 
-        idx = torch.where(self.data.site_id == site_id)[0]
-
+        idxes = []
+        for site_name in site_names:
+            site_id = np.where(pheno_df.SITE_ID.unique() == site_name)[0].item()
+            idx = torch.where(self.data.site_id == site_id)[0]
+            idxes.append(idx)
+        idx = torch.cat(idxes)
         return self.__indexing__(idx)
 
 
@@ -261,4 +264,5 @@ if __name__ == '__main__':
                   threshold=None,
                   site='ALL',
                   atlas='HCPMMP1')
+    abide.filter_by_site(["NYU", "UM_1"])
     pass
