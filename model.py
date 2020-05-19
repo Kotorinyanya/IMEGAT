@@ -44,11 +44,6 @@ class Net(nn.Module):
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
-        # self.first_domain_fc = nn.Sequential(
-        #     nn.Linear(30 * self.in_nodes, 20),
-        #     nn.LogSoftmax(dim=-1)
-        # )
-
         self.cnp1 = ConvNPool(in_channels=self.in_channels,
                               pool_nodes=self.pool1_nodes,
                               attention_heads=self.first_attention_heads,
@@ -56,15 +51,15 @@ class Net(nn.Module):
                               beta=1,
                               **cnp_params)
 
-        # self.attention_domain_fc = nn.Sequential(
-        #     nn.Linear(360 ** 2, 20),
-        #     nn.LogSoftmax(dim=-1)
-        # )
+        self.domain_conv = ParallelResGraphConv(self.hidden_dim, self.hidden_dim, self.hidden_dim,
+                                                dims=self.alpha_dim, depth=self.conv_depth)
 
         self.domain_fc = nn.Sequential(
+            # nn.BatchNorm1d(self.conv_depth * self.hidden_dim * self.alpha_dim * 2),
             nn.Dropout(dropout),
-            nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
+            nn.Linear(self.conv_depth * self.hidden_dim * self.alpha_dim * 2, 50),
             nn.ReLU(),
+            # nn.BatchNorm1d(50),
             nn.Dropout(dropout),
             nn.Linear(50, 20),  # 20 sites
             nn.LogSoftmax(dim=-1)
@@ -100,13 +95,18 @@ class Net(nn.Module):
         reg = p1_loss.unsqueeze(0)
         # reg = torch.tensor(0.).to(self.device)
 
-        # domain_alpha_out = self.attention_domain_fc(self.cnp1.alpha.reshape(num_graphs, -1))
+        # domain
+        domain_out = self.domain_conv(torch.cat([x for _ in range(self.alpha_dim)], dim=-1),
+                                      self.cnp1.alpha_index, self.cnp1.alpha, batch_mask)
+        domain_out = torch.cat([torch.cat(d, dim=1) for d in domain_out], dim=-1)
+        domain_out = domain_out.reshape(num_graphs, self.in_nodes, self.hidden_dim * self.conv_depth, self.alpha_dim)
+        domain_out = torch.cat([domain_out.max(dim=1)[0], domain_out.mean(dim=1)], dim=-1)  # readout
 
         p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
 
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
-        domain_fc_out = self.domain_fc(p1_x.reshape(num_graphs, -1))
+        domain_fc_out = self.domain_fc(domain_out.reshape(num_graphs, -1))
 
         if self.logging_hist:
             self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
@@ -119,6 +119,7 @@ class Net(nn.Module):
             self.writer.add_figure('alpha1', fig_1)
 
         assert not nan_or_inf(fc_out)
+        assert not nan_or_inf(domain_fc_out)
 
         return fc_out, domain_fc_out, reg
 
@@ -262,9 +263,9 @@ if __name__ == '__main__':
     from utils import gaussian_fit
     from dataset import ABIDE
 
-    dataset = ABIDE(root='datasets/NYU')
-    # model = Net()
-    model = MLP()
+    dataset = ABIDE(root='datasets/ALL')
+    model = Net()
+    # model = MLP()
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([dataset.__getitem__(i) for i in range(2)])
     model(batch)

@@ -103,15 +103,15 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     # 1
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
     # 2
-    # folds, fold = GroupKFold(n_splits=n_splits), 0
-    # iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.subject_id)
+    folds = GroupKFold(n_splits=n_splits)
+    iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.site_id)
     # 4
-    # folds, fold = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False), 0
+    # folds = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False)
     # iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy(), groups=dataset.data.subject_id)
     # 5
     fold = 0
-    iter = multi_site_cv_split(dataset.data.y, dataset.data.site_id, dataset.data.subject_id, 10,
-                               random_state=fold_seed, shuffle=True if fold_seed else False)
+    # iter = multi_site_cv_split(dataset.data.y, dataset.data.site_id, dataset.data.subject_id, 10,
+    #                            random_state=fold_seed, shuffle=True if fold_seed else False)
 
     for train_idx, val_idx in tqdm_notebook(iter, desc='CV', leave=False):
         fold += 1
@@ -203,8 +203,9 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         domain_y = torch.cat([domain_y, data.site_id.view(-1).to(device)])
 
                     loss = criterion(y_hat, y)
-                    domain_loss = -0.000001 * (criterion(domain_1, domain_y))
-                    print(loss, domain_loss)
+                    domain_loss = criterion(domain_1, domain_y)
+                    domain_loss = -1e-7 * domain_loss
+                    print(domain_loss.item())
                     total_loss = (loss + domain_loss).sum()
                     if is_reg:
                         total_loss += reg.sum()
@@ -326,7 +327,7 @@ if __name__ == "__main__":
     from model import *
 
     dataset = ABIDE(root='datasets/ALL')
-    dataset = dataset.filter_by_site('UCLA_1')
+    dataset = dataset.filter_by_site(['UCLA_1'])
     model = Net
     train_cross_validation(model, dataset, comment='test', batch_size=8, patience=200,
                            num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,

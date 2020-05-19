@@ -244,6 +244,11 @@ class ABIDE(InMemoryDataset):
         torch.save((self.data, self.slices), self.processed_paths[0])
 
     def filter_by_site(self, site_names):
+        """
+
+        :param site_names: list of str
+        :return:
+        """
         s3_pheno_path = '/'.join([self.root, 'raw', self.raw_file_names[1]])
         pheno_df = pd.read_csv(s3_pheno_path)
 
