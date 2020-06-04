@@ -243,6 +243,12 @@ class ABIDE(InMemoryDataset):
         self.data, self.slices = self.collate(data_list)
         torch.save((self.data, self.slices), self.processed_paths[0])
 
+    def __indexing__(self, index):
+        copy = self.__class__.__new__(self.__class__)
+        copy.__dict__ = self.__dict__.copy()
+        copy.data, copy.slices = self.collate([self.get(i) for i in index])
+        return copy
+
     def filter_by_site(self, site_names):
         """
 

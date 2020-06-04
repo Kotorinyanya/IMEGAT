@@ -128,7 +128,7 @@ def z_score_over_node(x, mean, std):
     return x
 
 
-def norm_train_val(dataset, train_idx, test_idx, num_nodes=360):
+def norm_train_val(dataset, train_idx, val_idx, num_nodes=360):
     tensor = dataset.data.x
     # missing value in dim 2
     # tensor[:, 2][tensor[:, 2] == 0] = .99
@@ -137,21 +137,21 @@ def norm_train_val(dataset, train_idx, test_idx, num_nodes=360):
     dataset.data.x = tensor
 
     train_dataset = dataset.__indexing__(train_idx)
-    test_dataset = dataset.__indexing__(test_idx)
+    val_dataset = dataset.__indexing__(val_idx)
     feature_dim = train_dataset.data.x.shape[-1]
     train_x = train_dataset.data.x.reshape(-1, num_nodes, feature_dim)
-    test_x = test_dataset.data.x.reshape(-1, num_nodes, feature_dim)
+    val_x = val_dataset.data.x.reshape(-1, num_nodes, feature_dim)
 
     train_mean = train_x.mean(0)
-    train_std = test_x.std(0)
+    train_std = train_x.std(0)
 
     train_x = z_score_over_node(train_x, train_mean, train_std)
-    test_x = z_score_over_node(test_x, train_mean, train_std)
+    val_x = z_score_over_node(val_x, train_mean, train_std)
 
     train_dataset.data.x = train_x.reshape(-1, feature_dim)
-    test_dataset.data.x = test_x.reshape(-1, feature_dim)
+    val_dataset.data.x = val_x.reshape(-1, feature_dim)
 
-    return train_dataset, test_dataset
+    return train_dataset, val_dataset
 
 
 def doubly_stochastic_normalization_2d_tensor(adj):

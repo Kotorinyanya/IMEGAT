@@ -25,14 +25,17 @@ from livelossplot import PlotLosses
 # torch.autograd.set_detect_anomaly(True)
 
 
+
+
+
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
-                           weight_decay=1e-2, num_epochs=200, n_splits=5,
+                           weight_decay=1e-2, num_epochs=200, n_splits=10,
                            use_gpu=True, dp=False, ddp=False,
                            comment='', tb_service_loc='192.168.192.57:6007', batch_size=1,
                            num_workers=0, pin_memory=False, cuda_device=None,
                            ddp_port='23456', fold_no=None, saved_model_path=None,
                            device_ids=None, patience=20, seed=None, fold_seed=None,
-                           save_model=False, is_reg=True, live_loss=True):
+                           save_model=False, is_reg=True, live_loss=True, domain_cls=True, final_cls=True):
     """
     :type fold_seed: int
     :param live_loss: bool
@@ -103,15 +106,15 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
     # 1
     # folds, fold = KFold(n_splits=n_splits, shuffle=False, random_state=seed), 0
     # 2
-    folds = GroupKFold(n_splits=n_splits)
-    iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.site_id)
+    # folds = GroupKFold(n_splits=n_splits)
+    # iter = folds.split(np.zeros(len(dataset)), groups=dataset.data.site_id)
     # 4
     # folds = StratifiedKFold(n_splits=n_splits, random_state=fold_seed, shuffle=True if fold_seed else False)
     # iter = folds.split(np.zeros(len(dataset)), dataset.data.y.numpy(), groups=dataset.data.subject_id)
     # 5
     fold = 0
-    # iter = multi_site_cv_split(dataset.data.y, dataset.data.site_id, dataset.data.subject_id, 10,
-    #                            random_state=fold_seed, shuffle=True if fold_seed else False)
+    iter = multi_site_cv_split(dataset.data.y, dataset.data.site_id, dataset.data.subject_id, n_splits,
+                               random_state=fold_seed, shuffle=True if fold_seed else False)
 
     for train_idx, val_idx in tqdm_notebook(iter, desc='CV', leave=False):
         fold += 1
@@ -194,7 +197,7 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                     if dp:
                         data_list = to_cuda(data_list, (device_ids[0] if device_ids is not None else 'cuda'))
 
-                    y_hat, domain_1, reg = model(data_list)
+                    y_hat, domain_yhat, reg = model(data_list)
 
                     y = torch.tensor([], dtype=dataset.data.y.dtype, device=device)
                     domain_y = torch.tensor([], dtype=dataset.data.site_id.dtype, device=device)
@@ -203,10 +206,22 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         domain_y = torch.cat([domain_y, data.site_id.view(-1).to(device)])
 
                     loss = criterion(y_hat, y)
-                    domain_loss = criterion(domain_1, domain_y)
-                    domain_loss = -1e-7 * domain_loss
-                    print(domain_loss.item())
-                    total_loss = (loss + domain_loss).sum()
+                    domain_loss = criterion(domain_yhat, domain_y)
+                    # domain_loss = -1e-7 * domain_loss
+                    # print(domain_loss.item())
+                    if domain_cls:
+                        total_loss = domain_loss
+                        _, predicted = torch.max(domain_yhat, 1)
+                        label = domain_y
+                    if final_cls:
+                        total_loss = loss
+                        _, predicted = torch.max(y_hat, 1)
+                        label = y
+                    if domain_cls and final_cls:
+                        total_loss = (loss + domain_loss).sum()
+                        _, predicted = torch.max(y_hat, 1)
+                        label = y
+
                     if is_reg:
                         total_loss += reg.sum()
 
@@ -216,9 +231,6 @@ def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
                         total_loss.backward()
                         nn.utils.clip_grad_norm_(model.parameters(), 2.0)
                         optimizer.step()
-
-                    _, predicted = torch.max(y_hat, 1)
-                    label = y
 
                     running_nll_loss += loss.item()
                     running_total_loss += total_loss.item()
@@ -327,7 +339,7 @@ if __name__ == "__main__":
     from model import *
 
     dataset = ABIDE(root='datasets/ALL')
-    dataset = dataset.filter_by_site(['UCLA_1'])
+    dataset = dataset.filter_by_site(['NYU', 'USM', 'UM_1', 'UCLA_1'])
     model = Net
     train_cross_validation(model, dataset, comment='test', batch_size=8, patience=200,
                            num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,

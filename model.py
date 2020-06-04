@@ -61,7 +61,7 @@ class Net(nn.Module):
             nn.ReLU(),
             # nn.BatchNorm1d(50),
             nn.Dropout(dropout),
-            nn.Linear(50, 20),  # 20 sites
+            nn.Linear(50, 4),  # 20 sites
             nn.LogSoftmax(dim=-1)
         )
 
