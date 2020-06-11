@@ -1,4 +1,5 @@
 import logging
+import os
 import os.path as osp
 
 import torch
@@ -39,6 +40,14 @@ def to_cuda(data_list, device):
             data[k] = v.to(device)
         data_list[i] = data
     return data_list
+
+
+def find_open_port():
+    for port in range(10000, 30000):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            res = sock.connect_ex(('localhost', port))
+            if res == 111:  # not in use
+                return port
 
 
 def add_self_loops_with_edge_attr(edge_index, edge_attr, num_nodes=None):
@@ -126,32 +135,6 @@ def z_score_over_node(x, mean, std):
     for i in range(num_nodes):
         x[:, i, :] = (x[:, i, :] - mean[i]) / std[i]
     return x
-
-
-def norm_train_val(dataset, train_idx, val_idx, num_nodes=360):
-    tensor = dataset.data.x
-    # missing value in dim 2
-    # tensor[:, 2][tensor[:, 2] == 0] = .99
-    # log along dim
-    tensor = log_along_dim(tensor, [6])
-    dataset.data.x = tensor
-
-    train_dataset = dataset.__indexing__(train_idx)
-    val_dataset = dataset.__indexing__(val_idx)
-    feature_dim = train_dataset.data.x.shape[-1]
-    train_x = train_dataset.data.x.reshape(-1, num_nodes, feature_dim)
-    val_x = val_dataset.data.x.reshape(-1, num_nodes, feature_dim)
-
-    train_mean = train_x.mean(0)
-    train_std = train_x.std(0)
-
-    train_x = z_score_over_node(train_x, train_mean, train_std)
-    val_x = z_score_over_node(val_x, train_mean, train_std)
-
-    train_dataset.data.x = train_x.reshape(-1, feature_dim)
-    val_dataset.data.x = val_x.reshape(-1, feature_dim)
-
-    return train_dataset, val_dataset
 
 
 def doubly_stochastic_normalization_2d_tensor(adj):
@@ -458,6 +441,53 @@ def multi_site_cv_split(y, site_ids, subject_ids, n_splits, random_state=None, s
     cv_list = [(np.concatenate(t), np.concatenate(v)) for t, v in cv_list]
 
     return cv_list
+
+
+def norm_train_val(dataset, train_idx, val_idx, num_nodes=360):
+    tensor = dataset.data.x
+    # missing value in dim 2
+    # tensor[:, 2][tensor[:, 2] == 0] = .99
+    # log along dim
+    tensor = log_along_dim(tensor, [6])
+    dataset.data.x = tensor
+
+    train_dataset = dataset.__indexing__(train_idx)
+    val_dataset = dataset.__indexing__(val_idx)
+    feature_dim = train_dataset.data.x.shape[-1]
+
+    all_train_x = train_dataset.data.x.reshape(-1, num_nodes, feature_dim)
+    all_val_x = val_dataset.data.x.reshape(-1, num_nodes, feature_dim)
+
+    for site in dataset.data.site_id.unique():
+        # get
+        train_x = all_train_x[(train_dataset.data.site_id == site).nonzero()]
+        val_x = all_val_x[(val_dataset.data.site_id == site).nonzero()]
+        # norm
+        mean = train_x.mean(0)
+        std = train_x.std(0)
+        train_x = z_score_over_node(train_x, mean, std)
+        val_x = z_score_over_node(val_x, mean, std)
+        # update
+        all_train_x[(train_dataset.data.site_id == site).nonzero()] = train_x
+        all_val_x[(val_dataset.data.site_id == site).nonzero()] = val_x
+
+    # train_mean = train_x.mean(0)
+    # train_std = train_x.std(0)
+    #
+    # train_x = z_score_over_node(train_x, train_mean, train_std)
+    # val_x = z_score_over_node(val_x, train_mean, train_std)
+
+    train_dataset.data.x = train_x.reshape(-1, feature_dim)
+    val_dataset.data.x = val_x.reshape(-1, feature_dim)
+
+    return train_dataset, val_dataset
+
+
+def my_save(obj, path):
+    folder_path = '/'.join(path.split('/')[:-1])
+    if not os.path.exists(folder_path):
+        os.mkdir(folder_path)
+    torch.save(obj, path)
 
 
 if __name__ == '__main__':

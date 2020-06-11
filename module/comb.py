@@ -3,6 +3,7 @@ from torch import nn
 
 from module import EGATConv, GraphConv
 from module import InstanceNorm
+from torch_geometric.nn import GINConv
 from utils import *
 
 

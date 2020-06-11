@@ -9,9 +9,10 @@ from nilearn.plotting import plot_matrix
 
 class Net(nn.Module):
 
-    def __init__(self, writer=None, dropout=0.0):
+    def __init__(self, writer=None):
         super(Net, self).__init__()
 
+        self.dropout = 0.5
         self.writer = writer
         self.in_channels = 30
         self.hidden_dim = 30
@@ -50,26 +51,26 @@ class Net(nn.Module):
                               in_dims=1,
                               beta=1,
                               **cnp_params)
-
-        self.domain_conv = ParallelResGraphConv(self.hidden_dim, self.hidden_dim, self.hidden_dim,
-                                                dims=self.alpha_dim, depth=self.conv_depth)
-
-        self.domain_fc = nn.Sequential(
-            # nn.BatchNorm1d(self.conv_depth * self.hidden_dim * self.alpha_dim * 2),
-            nn.Dropout(dropout),
-            nn.Linear(self.conv_depth * self.hidden_dim * self.alpha_dim * 2, 50),
-            nn.ReLU(),
-            # nn.BatchNorm1d(50),
-            nn.Dropout(dropout),
-            nn.Linear(50, 4),  # 20 sites
-            nn.LogSoftmax(dim=-1)
-        )
+        #
+        # self.domain_conv = ParallelResGraphConv(self.hidden_dim, self.hidden_dim, self.hidden_dim,
+        #                                         dims=self.alpha_dim, depth=self.conv_depth)
+        #
+        # self.domain_fc = nn.Sequential(
+        #     # nn.BatchNorm1d(self.conv_depth * self.hidden_dim * self.alpha_dim * 2),
+        #     nn.Dropout(self.dropout),
+        #     nn.Linear(self.conv_depth * self.hidden_dim * self.alpha_dim * 2, 50),
+        #     nn.ReLU(),
+        #     # nn.BatchNorm1d(50),
+        #     nn.Dropout(self.dropout),
+        #     nn.Linear(50, 4),  # 20 sites
+        #     nn.LogSoftmax(dim=-1)
+        # )
 
         self.final_fc = nn.Sequential(
-            nn.Dropout(dropout),
+            nn.Dropout(self.dropout),
             nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Dropout(self.dropout),
             nn.Linear(50, 2),
             nn.LogSoftmax(dim=-1)
         )
@@ -96,17 +97,18 @@ class Net(nn.Module):
         # reg = torch.tensor(0.).to(self.device)
 
         # domain
-        domain_out = self.domain_conv(torch.cat([x for _ in range(self.alpha_dim)], dim=-1),
-                                      self.cnp1.alpha_index, self.cnp1.alpha, batch_mask)
-        domain_out = torch.cat([torch.cat(d, dim=1) for d in domain_out], dim=-1)
-        domain_out = domain_out.reshape(num_graphs, self.in_nodes, self.hidden_dim * self.conv_depth, self.alpha_dim)
-        domain_out = torch.cat([domain_out.max(dim=1)[0], domain_out.mean(dim=1)], dim=-1)  # readout
+        # domain_out = self.domain_conv(torch.cat([x for _ in range(self.alpha_dim)], dim=-1),
+        #                               self.cnp1.alpha_index, self.cnp1.alpha, batch_mask)
+        # domain_out = torch.cat([torch.cat(d, dim=1) for d in domain_out], dim=-1)
+        # domain_out = domain_out.reshape(num_graphs, self.in_nodes, self.hidden_dim * self.conv_depth, self.alpha_dim)
+        # domain_out = torch.cat([domain_out.max(dim=1)[0], domain_out.mean(dim=1)], dim=-1)  # readout
 
         p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
 
         fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
-        domain_fc_out = self.domain_fc(domain_out.reshape(num_graphs, -1))
+        # domain_fc_out = self.domain_fc(domain_out.reshape(num_graphs, -1))
+        domain_fc_out = None
 
         if self.logging_hist:
             self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
@@ -117,9 +119,6 @@ class Net(nn.Module):
             fig_1 = plot_matrix(adj_1[0, 0].detach().cpu())
             fig_1.show()
             self.writer.add_figure('alpha1', fig_1)
-
-        assert not nan_or_inf(fc_out)
-        assert not nan_or_inf(domain_fc_out)
 
         return fc_out, domain_fc_out, reg
 
