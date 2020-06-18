@@ -275,8 +275,11 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
 
     for epoch in range(num_epochs):
         for phase in ['train', 'val']:
-            # train
-            res = train_val(model, optimizer, train_dataloader, phase)
+            if phase == 'train':
+                dataloader = train_dataloader
+            else:
+                dataloader = val_dataloader
+            res = train_val(model, optimizer, dataloader, phase)
             res['epoch'] = epoch
             res['site'] = site
             res['phase'] = phase
