@@ -40,7 +40,7 @@ def train_val(model, optimizer, dataloader, phase):
     # running_domain_loss = 0.0
     epoch_label, epoch_predicted = torch.tensor([]), torch.tensor([])
 
-    for data_list in tqdm_notebook(dataloader, desc=phase, leave=False):
+    for data_list in dataloader:
 
         y_hat, domain_yhat, reg = model(data_list)
 
