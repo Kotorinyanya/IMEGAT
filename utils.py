@@ -490,6 +490,52 @@ def my_save(obj, path):
     torch.save(obj, path)
 
 
+def dfc_from_ts(ts, window=60, step=1):
+    from nilearn.connectome import ConnectivityMeasure
+
+    # remove padding zero
+    ts = ts.t()
+    ts = ts[ts.sum(1) != 0]
+
+    # slice ts
+    start = 0
+    end = window
+    time_series_list = []
+    while end < ts.shape[0]:
+        time_series_list.append(ts[start:end].numpy())
+        start += step
+        end += step
+
+    correlation_measure = ConnectivityMeasure(kind='correlation')
+    return correlation_measure.fit_transform(time_series_list)
+
+
+def load_dp_model(model, path):
+    # original saved file with DataParallel
+    state_dict = torch.load(path)
+    # create new OrderedDict that does not contain `module.`
+    from collections import OrderedDict
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k[7:]  # remove `module.`
+        new_state_dict[name] = v
+    # load params
+    model.load_state_dict(new_state_dict)
+
+
+def phrase(saved_model):
+    chunks = saved_model.split('-')
+    cchunks = saved_model.split('_')
+    run = cchunks[0] + '-' + cchunks[1] + '-' + cchunks[2]
+    site = cchunks[4]
+    model = chunks[4]
+    fold = int(chunks[3].split('_')[-1][len(model):])
+    epoch = int(chunks[5])
+    acc = float(chunks[6])
+    loss = float(chunks[7])
+    return (run, site, model, fold, epoch, acc, loss, saved_model)
+
+
 if __name__ == '__main__':
     from dataset import ABIDE
 
