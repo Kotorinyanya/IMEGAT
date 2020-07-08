@@ -206,7 +206,7 @@ class ABIDE(InMemoryDataset):
                 for adj, time_series in zip(connectivity_matrix_list, time_series_list):
                     time_series, raw_adj = torch.tensor(time_series), torch.tensor(adj)
                     adj_statistics = get_adj_statistics(adj)
-                    padded_time_series = torch.zeros(200, 360)
+                    padded_time_series = torch.zeros(400, 360)
                     padded_time_series[:time_series.shape[0]] = time_series
                     padded_time_series = padded_time_series.t()
 
@@ -269,7 +269,7 @@ class ABIDE(InMemoryDataset):
 
 if __name__ == '__main__':
     abide = ABIDE(root='datasets/ALL',
-                  resample_ts=True,
+                  resample_ts=False,
                   transform_edge=None,
                   additional_node_feature_func=get_adj_statistics,
                   threshold=None,

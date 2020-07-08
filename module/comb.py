@@ -211,7 +211,6 @@ class ConvNPool(nn.Module):
 
         # attention
         x1, alpha, alpha_index = self.egat_conv(x, edge_index, edge_attr, batch_mask)
-        self.alpha, self.alpha_index = alpha, alpha_index  # save attention
         # x1 = self.bn(x1)
 
         # conv
@@ -224,6 +223,14 @@ class ConvNPool(nn.Module):
             x1_to_pool = out_last
             x_in = torch.stack([x for _ in range(self.attention_dim)], dim=-1) if x.dim() == 2 else x
             p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment = self.pool(x_in, alpha_index, alpha, x1_to_pool, batch)
+
+            # save for interpretation
+            self.alpha, self.alpha_index = alpha.detach().cpu(), alpha_index.detach().cpu()  # save attention
+            self.out_all = out_all.detach().cpu()
+            self.p1_x = p1_x.detach().cpu()
+            self.p1_ei = p1_ei.detach().cpu()
+            self.p1_ea = p1_ea.detach().cpu()
+            self.p1_assignment = assignment.detach().cpu()
             return out_all, p1_x, p1_ei, p1_ea, p1_batch, p1_loss, assignment
         else:
             # without pool
