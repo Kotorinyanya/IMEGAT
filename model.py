@@ -19,7 +19,7 @@ class Net(nn.Module):
         self.in_nodes = 360
         self.pool1_nodes = 5
         self.first_attention_heads = 5
-        self.conv_depth = 3  # 6 for single-site, 3 for multi-site (faster)
+        self.conv_depth = 3
         self.pool_conv_depth = 3
         self.att_dropout = 0.
         self.concat = True
@@ -39,9 +39,9 @@ class Net(nn.Module):
                       "el": 1}
 
         self.first_fc = nn.ModuleList([
-            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(7, 15), nn.BatchNorm1d(15)),
+            nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
+            # nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
@@ -79,9 +79,12 @@ class Net(nn.Module):
         if type(batch) == list:  # Data list
             batch = Batch.from_data_list(batch)
 
-        all_x = [batch.x.to(self.device),
-                 batch.adj_statistics.to(self.device),
-                 batch.raw_adj.to(self.device), ]
+        all_x = [
+            batch.x.to(self.device),
+            batch.adj_statistics.to(self.device),
+            # batch.raw_adj.to(self.device),
+        ]
+
         # batch.time_series.to(self.device)]
         edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr

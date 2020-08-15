@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch_geometric.utils import softmax, remove_self_loops, add_self_loops, dropout_adj
 from torch_scatter import scatter_add
 
-from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf, add_self_loops_mul
+# from utils import add_self_loops_with_edge_attr, real_softmax, nan_or_inf, add_self_loops_mul
 from .instance_norm import InstanceNorm
 
 
@@ -35,8 +35,8 @@ class Attention(nn.Module):
         )
 
     def forward(self, x, edge_index, edge_attr):
-        edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-        edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
+        # edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+        # edge_index, edge_attr = add_self_loops(edge_index, edge_attr)
         row, col = edge_index
 
         # Compute attention coefficients
@@ -52,13 +52,16 @@ class Attention(nn.Module):
         # alpha *= 10  # de-flatten
         # alpha = softmax(alpha, row)
         # edge_attr = torch.exp(edge_attr / 2 - 1)
-        alpha = alpha * edge_attr.reshape(-1, 1).abs()
+        alpha = alpha * edge_attr.reshape(-1, 1)
 
         # Dropout attentions
         if self.att_dropout > 0:
             edge_index, alpha = dropout_adj(edge_index, alpha, self.att_dropout, training=self.training)
-        # # Add self-loop to alpha
-        # edge_index, alpha = add_self_loops_mul(edge_index, alpha)
+
+        # Re-Add self-loop to alpha
+        mask = row == col
+        new_mask = torch.stack([mask for _ in range(self.heads)], dim=-1)
+        alpha = alpha.masked_fill(new_mask, 1)
 
         if not self.concat:
             alpha = alpha.mean(-1).reshape(-1, 1)
@@ -130,7 +133,14 @@ class EGATConv(nn.Module):
         alpha, alpha_index = self.attention(x, edge_index, edge_attr)
 
         row, col = alpha_index
-        out = self.my_cast(alpha, x[col])
+        num_nodes = x.size(0)
+
+        deg = scatter_add(alpha.abs(), row, dim=0, dim_size=num_nodes)
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        norm = deg_inv_sqrt[row] * alpha * deg_inv_sqrt[col]
+
+        out = self.my_cast(norm, x[col])
         out = scatter_add(out, row, dim=0, dim_size=x.size(0))
 
         if self.bias is not None:
@@ -157,10 +167,9 @@ class EGATConv(nn.Module):
 
 
 if __name__ == '__main__':
-    from utils import z_score_norm_data
     from dataset import ABIDE
 
-    dataset = ABIDE(root='../datasets/NYU', transform=z_score_norm_data)
+    dataset = ABIDE(root='../datasets/NYU')
     conv = EGATConv(7, 30, heads=5, concat=True)
     data = dataset.__getitem__(0)
     batch = Batch.from_data_list([data])

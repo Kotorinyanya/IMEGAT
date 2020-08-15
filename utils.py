@@ -490,11 +490,17 @@ def my_save(obj, path):
     torch.save(obj, path)
 
 
-def dfc_from_ts(ts, window=60, step=1):
+def dfc_from_ts(ts, window=30, step=1):
     from nilearn.connectome import ConnectivityMeasure
+    time_series_list = window_slpit_ts(ts, window, step)
+    correlation_measure = ConnectivityMeasure(kind='correlation')
+    return correlation_measure.fit_transform(time_series_list)
+
+
+def window_slpit_ts(ts, window=30, step=1):
+    # ts: numpy.ndarray shape (length, num_nodes)
 
     # remove padding zero
-    ts = ts.t()
     ts = ts[ts.sum(1) != 0]
 
     # slice ts
@@ -502,12 +508,11 @@ def dfc_from_ts(ts, window=60, step=1):
     end = window
     time_series_list = []
     while end < ts.shape[0]:
-        time_series_list.append(ts[start:end].numpy())
+        time_series_list.append(ts[start:end])
         start += step
         end += step
 
-    correlation_measure = ConnectivityMeasure(kind='correlation')
-    return correlation_measure.fit_transform(time_series_list)
+    return time_series_list
 
 
 def load_dp_model(model, path):

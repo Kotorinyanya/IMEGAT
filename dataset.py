@@ -23,7 +23,8 @@ import urllib.request as request
 
 from scipy.stats import kurtosis, skew
 
-from utils import z_score_norm_data, positive_transform, nan_or_inf, check_strongly_connected, fisher_z, drop_negative
+from utils import z_score_norm_data, positive_transform, nan_or_inf, check_strongly_connected, fisher_z, drop_negative, \
+    window_slpit_ts
 
 from data_utils import read_fs_stats, extract_time_series, download_abide, \
     process_fs_output, resample_temporal, top_k_percent_adj, label_from_pheno, repermute, get_adj_statistics, get_hs
@@ -37,6 +38,7 @@ class ABIDE(InMemoryDataset):
                  name='ABIDE',
                  transform=None,
                  resample_ts=False,
+                 dfc_resample=False,
                  transform_edge=None,
                  additional_node_feature_func=None,
                  threshold=None,
@@ -62,6 +64,7 @@ class ABIDE(InMemoryDataset):
         :param extension: str
         :param mean_fd_thresh: float
         """
+        self.dfc_resample = dfc_resample
         self.threshold = threshold
         self.additional_node_feature_func = additional_node_feature_func
         self.atlas = atlas
@@ -200,13 +203,18 @@ class ABIDE(InMemoryDataset):
                     time_series = nilearn.signal.clean(time_series.transpose(), low_pass=0.1, high_pass=0.01, t_r=1.6667
                                                        ).transpose()
                 # optional data augmentation
-                time_series_list = resample_temporal(time_series) if self.resample_ts else [time_series]
+                if self.resample_ts:
+                    time_series_list = resample_temporal(time_series)
+                elif self.dfc_resample:
+                    time_series_list = window_slpit_ts(time_series, window=30, step=5)
+                else:
+                    time_series_list = [time_series]
                 # correlation form time series
                 connectivity_matrix_list = correlation_measure.fit_transform(time_series_list)
                 for adj, time_series in zip(connectivity_matrix_list, time_series_list):
                     time_series, raw_adj = torch.tensor(time_series), torch.tensor(adj)
                     adj_statistics = get_adj_statistics(adj)
-                    padded_time_series = torch.zeros(400, 360)
+                    padded_time_series = torch.zeros(30, 360)
                     padded_time_series[:time_series.shape[0]] = time_series
                     padded_time_series = padded_time_series.t()
 
@@ -270,6 +278,7 @@ class ABIDE(InMemoryDataset):
 if __name__ == '__main__':
     abide = ABIDE(root='datasets/ALL',
                   resample_ts=False,
+                  dfc_resample=True,
                   transform_edge=None,
                   additional_node_feature_func=get_adj_statistics,
                   threshold=None,

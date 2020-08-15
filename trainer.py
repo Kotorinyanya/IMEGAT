@@ -246,12 +246,12 @@ def train_cross_site(model_cls, dataset, sites, lr=1e-3,
 
 
 def train_single_site(model_cls, dataset, sites, lr=1e-3,
-                      weight_decay=1e-2, num_epochs=200, n_splits=5,
+                      weight_decay=1e-2, num_epochs=200, n_splits=10,
                       use_gpu=True, dp=False, ddp=False,
                       comment='', batch_size=1, fold_no=1,
-                      tb_dir='runs', model_save_dir='saved_models', res_save_dir='res',
+                      tb_dir='runs', res_save_dir='res',
                       device_ids=None, seed=None, fold_seed=None,
-                      save_model=False):
+                      save_model=True):
     # save configuration
     saved_args = locals()
     seed = int(time.time() % 1e4 * 1e5) if seed is None else seed
@@ -274,6 +274,7 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
     train_dataloader, val_dataloader = cv_prepare_dataloader(dataset, batch_size * k, fold_no, n_splits, fold_seed)
 
     for epoch in range(num_epochs):
+        model_save_path = osp.join(res_save_dir, 'epoch_{}.pb'.format(epoch))
         for phase in ['train', 'val']:
             if phase == 'train':
                 dataloader = train_dataloader
@@ -283,6 +284,9 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
             res['epoch'] = epoch
             res['site'] = site
             res['phase'] = phase
+            res['run'] = log_dir_base
+            res['fold'] = fold_no
+            res['model_save_path'] = model_save_path
             res_df = res_df.append(res, ignore_index=True)
 
             my_save(res_df, osp.join(res_save_dir, 'res_df'))
@@ -297,6 +301,8 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
                 writer.add_scalars('reg_loss'.format(phase),
                                    {'{}_reg_loss'.format(phase): res['reg_loss']},
                                    epoch)
+        if save_model:
+            torch.save(model.state_dict(), model_save_path)
 
 
 def train_cross_validation(model_cls, dataset, dropout=0.0, lr=1e-3,
