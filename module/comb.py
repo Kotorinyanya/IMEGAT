@@ -227,6 +227,7 @@ class ConvNPool(nn.Module):
             # save for interpretation
             self.alpha, self.alpha_index = alpha.detach().cpu(), alpha_index.detach().cpu()  # save attention
             self.out_all = out_all.detach().cpu()
+            self.out_last = out_last.detach().cpu()
             self.p1_x = p1_x.detach().cpu()
             self.p1_ei = p1_ei.detach().cpu()
             self.p1_ea = p1_ea.detach().cpu()
