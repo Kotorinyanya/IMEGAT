@@ -43,7 +43,7 @@ class Attention(nn.Module):
         alpha = torch.cat([x[row], x[col]], dim=-1)
         alpha = self.alpha_fc(alpha)
 
-        # alpha = alpha * edge_attr.reshape(-1, 1)
+        alpha = alpha * edge_attr.reshape(-1, 1)
 
         # sigmoid
         alpha = torch.sigmoid(alpha)

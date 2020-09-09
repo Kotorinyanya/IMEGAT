@@ -39,9 +39,9 @@ class Net(nn.Module):
                       "el": 1}
 
         self.first_fc = nn.ModuleList([
-            nn.Sequential(nn.Linear(7, 15), nn.BatchNorm1d(15)),
-            nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
-            # nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
@@ -108,8 +108,10 @@ class Net(nn.Module):
 
         p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
+        self.fc_in = p1_x.reshape(num_graphs, -1)
 
-        fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
+        fc_out = self.final_fc(self.fc_in)
+        self.fc_out = fc_out
         # domain_fc_out = self.domain_fc(domain_out.reshape(num_graphs, -1))
         domain_fc_out = None
 
@@ -230,8 +232,8 @@ class MLP(nn.Module):
             nn.Linear(30 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(50, 20),
-            nn.LogSoftmax(),
+            nn.Linear(50, 2),
+            nn.LogSoftmax(dim=-1),
         )
 
     def forward(self, batch):
@@ -254,7 +256,7 @@ class MLP(nn.Module):
 
         reg = torch.tensor(0.).to(self.device)
 
-        return out, reg
+        return out, None, reg
 
     @property
     def device(self):
