@@ -82,10 +82,9 @@ class Net(nn.Module):
         all_x = [
             batch.x.to(self.device),
             batch.adj_statistics.to(self.device),
-            # batch.raw_adj.to(self.device),
+            batch.raw_adj.to(self.device),
         ]
 
-        # batch.time_series.to(self.device)]
         edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
         num_graphs, batch_mask = batch.num_graphs, batch.batch.to(self.device)
