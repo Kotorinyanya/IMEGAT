@@ -46,13 +46,13 @@ def train_val(model, optimizer, dataloader, phase):
 
         device = y_hat.device
 
-        y = torch.tensor([], dtype=data_list[0].y.dtype, device=device)
+        y = torch.tensor([], dtype=data_list[0].iq.dtype, device=device)
         domain_y = torch.tensor([], dtype=data_list[0].site_id.dtype, device=device)
         for data in data_list:
-            y = torch.cat([y, data.y.view(-1).to(device)])
+            y = torch.cat([y, data.iq.view(-1).to(device)])
             domain_y = torch.cat([domain_y, data.site_id.view(-1).to(device)])
 
-        loss = F.nll_loss(y_hat, y)
+        loss = F.mse_loss(y_hat, y.reshape(-1, 1))
         domain_loss = F.nll_loss(domain_yhat, domain_y) if domain_yhat else None
         # domain_loss = -1e-7 * domain_loss
         # print(domain_loss.item())。
@@ -63,7 +63,8 @@ def train_val(model, optimizer, dataloader, phase):
         if domain_loss is not None:
             total_loss += domain_loss.sum()
 
-        _, predicted = torch.max(y_hat, 1)
+        # _, predicted = torch.max(y_hat, 1)
+        predicted = y_hat
         label = y
 
         if phase == 'train':
@@ -81,21 +82,26 @@ def train_val(model, optimizer, dataloader, phase):
         epoch_label = torch.cat([epoch_label, label.detach().float().view(-1).cpu()])
         epoch_predicted = torch.cat([epoch_predicted, predicted.detach().float().view(-1).cpu()])
 
-    precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted)
-    recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted)
-    f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted)
-    accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
+    # precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted)
+    # recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted)
+    # f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted)
+    # accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
+    mae = sklearn.metrics.mean_absolute_error(epoch_label, epoch_predicted)
     total_loss = running_total_loss / dataloader.__len__()
     nll_loss = running_nll_loss / dataloader.__len__()
     reg_loss = running_reg_loss / dataloader.__len__()
 
+    # print(epoch_label, '\n', epoch_predicted)
+    # print(mae, total_loss)
+
     return {
-        'accuracy': accuracy,
-        'f1_score': f1_score,
-        'precision': precision,
-        'recall': recall,
+        # 'accuracy': accuracy,
+        # 'f1_score': f1_score,
+        # 'precision': precision,
+        # 'recall': recall,
+        'mae': mae,
         'total_loss': total_loss,
-        'nll_loss': nll_loss,
+        'mse_loss': nll_loss,
         'reg_loss': reg_loss,
     }
 
@@ -251,7 +257,7 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
                       comment='', batch_size=1, fold_no=1,
                       tb_dir='runs', res_save_dir='res',
                       device_ids=None, seed=None, fold_seed=None,
-                      save_model=True):
+                      save_model=False):
     # save configuration
     saved_args = locals()
     seed = int(time.time() % 1e4 * 1e5) if seed is None else seed
@@ -291,12 +297,12 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
 
             my_save(res_df, osp.join(res_save_dir, 'res_df'))
 
-            writer.add_scalars('nll_loss',
-                               {'{}_nll_loss'.format(phase): res['nll_loss']},
+            writer.add_scalars('mse_loss',
+                               {'{}_nll_loss'.format(phase): res['mse_loss']},
                                epoch)
-            writer.add_scalars('accuracy',
-                               {'{}_accuracy'.format(phase): res['accuracy']},
-                               epoch)
+            # writer.add_scalars('accuracy',
+            #                    {'{}_accuracy'.format(phase): res['accuracy']},
+            #                    epoch)
             if res['reg_loss'] is not None:
                 writer.add_scalars('reg_loss'.format(phase),
                                    {'{}_reg_loss'.format(phase): res['reg_loss']},
@@ -619,7 +625,7 @@ if __name__ == "__main__":
     dataset = ABIDE(root='datasets/ALL')
     sites = ['NYU', 'USM', 'UM_1', 'UCLA_1']
     dataset = dataset.filter_by_site(sites)
-    model = Net
+    model = MLP
     # train_cross_validation(model, dataset, comment='test', batch_size=8, patience=200,
     #                        num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,
     #                        use_gpu=True, dp=False, ddp=False, fold_no=1,

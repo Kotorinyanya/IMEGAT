@@ -71,8 +71,8 @@ class Net(nn.Module):
             nn.Linear(1 * self.hidden_dim * self.alpha_dim * 1, 50),
             nn.ReLU(),
             nn.Dropout(self.dropout),
-            nn.Linear(50, 2),
-            nn.LogSoftmax(dim=-1)
+            nn.Linear(50, 1),
+            # nn.LogSoftmax(dim=-1)
         )
 
     def forward(self, batch):
@@ -224,15 +224,14 @@ class MLP(nn.Module):
             nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
             nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
             nn.Sequential(nn.Linear(360, 10), nn.BatchNorm1d(10)),
-            # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
         self.fc = nn.Sequential(
             nn.Linear(30 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(50, 2),
-            nn.LogSoftmax(dim=-1),
+            nn.Linear(50, 1),
+            # nn.LogSoftmax(dim=-1),
         )
 
     def forward(self, batch):
