@@ -250,7 +250,7 @@ class ABIDE(InMemoryDataset):
 
         idx = torch.where(self.data.site_id == site_id)[0]
 
-        return self.__indexing__(idx)
+        return self.copy(idx)
 
 
 if __name__ == '__main__':
