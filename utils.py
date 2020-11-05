@@ -136,8 +136,8 @@ def norm_train_val(dataset, train_idx, test_idx, num_nodes=360):
     tensor = log_along_dim(tensor, [6])
     dataset.data.x = tensor
 
-    train_dataset = dataset.__indexing__(train_idx)
-    test_dataset = dataset.__indexing__(test_idx)
+    train_dataset = dataset.copy(train_idx)
+    test_dataset = dataset.copy(test_idx)
     feature_dim = train_dataset.data.x.shape[-1]
     train_x = train_dataset.data.x.reshape(-1, num_nodes, feature_dim)
     test_x = test_dataset.data.x.reshape(-1, num_nodes, feature_dim)
