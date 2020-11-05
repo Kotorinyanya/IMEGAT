@@ -218,6 +218,9 @@ class ConvNPool(nn.Module):
         out_all = torch.cat([torch.cat(d, dim=1) for d in conv_out], dim=-1)
         out_last = torch.cat([d[-1] for d in conv_out], dim=-1)
 
+        self.out_all = out_all
+        self.out_last = out_last
+
         if not self.no_pool:
             # pool
             x1_to_pool = out_last

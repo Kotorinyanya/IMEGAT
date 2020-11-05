@@ -80,7 +80,14 @@ class Net(nn.Module):
 
         p1_x = p1_x.reshape(num_graphs, self.pool1_nodes, self.hidden_dim, self.alpha_dim)
         p1_x = p1_x.max(dim=1)[0]  # max pooling
-        fc_out = self.final_fc(p1_x.reshape(num_graphs, -1))
+        fc_in = p1_x.reshape(num_graphs, -1)
+        fc_out = self.final_fc(fc_in)
+
+        self.p1_x = p1_x
+        self.p1_ei = p1_ei
+        self.p1_ea = p1_ea
+        self.fc_in = fc_in
+        self.p1_assignment = p1_assignment
 
         if self.logging_hist:
             self.writer.add_histogram('alpha1', self.cnp1.alpha.detach().cpu().flatten())
