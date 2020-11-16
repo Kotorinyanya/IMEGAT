@@ -87,6 +87,7 @@ def train_val(model, optimizer, dataloader, phase):
     # f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted)
     # accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
     mae = sklearn.metrics.mean_absolute_error(epoch_label, epoch_predicted)
+    r2 = sklearn.metrics.r2_score(epoch_label, epoch_predicted)
     total_loss = running_total_loss / dataloader.__len__()
     nll_loss = running_nll_loss / dataloader.__len__()
     reg_loss = running_reg_loss / dataloader.__len__()
@@ -100,6 +101,7 @@ def train_val(model, optimizer, dataloader, phase):
         # 'precision': precision,
         # 'recall': recall,
         'mae': mae,
+        'r2': r2,
         'total_loss': total_loss,
         'mse_loss': nll_loss,
         'reg_loss': reg_loss,
