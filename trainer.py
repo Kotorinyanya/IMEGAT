@@ -38,7 +38,7 @@ def train_val(model, optimizer, dataloader, phase):
     running_reg_loss = 0.0
     running_nll_loss = 0.0
     # running_domain_loss = 0.0
-    epoch_label, epoch_predicted = torch.tensor([]), torch.tensor([])
+    epoch_label, epoch_predicted, epoch_yhat = torch.tensor([]), torch.tensor([]), torch.tensor([])
 
     for data_list in dataloader:
 
@@ -80,11 +80,13 @@ def train_val(model, optimizer, dataloader, phase):
 
         epoch_label = torch.cat([epoch_label, label.detach().float().view(-1).cpu()])
         epoch_predicted = torch.cat([epoch_predicted, predicted.detach().float().view(-1).cpu()])
+        epoch_yhat = torch.cat([epoch_yhat, y_hat.detach().float().cpu()], dim=0)
 
     precision = sklearn.metrics.precision_score(epoch_label, epoch_predicted)
     recall = sklearn.metrics.recall_score(epoch_label, epoch_predicted)
     f1_score = sklearn.metrics.f1_score(epoch_label, epoch_predicted)
     accuracy = sklearn.metrics.accuracy_score(epoch_label, epoch_predicted)
+    auc = sklearn.metrics.roc_auc_score(epoch_label, epoch_yhat.exp()[:, 1])
     total_loss = running_total_loss / dataloader.__len__()
     nll_loss = running_nll_loss / dataloader.__len__()
     reg_loss = running_reg_loss / dataloader.__len__()
@@ -94,6 +96,7 @@ def train_val(model, optimizer, dataloader, phase):
         'f1_score': f1_score,
         'precision': precision,
         'recall': recall,
+        'auc': auc,
         'total_loss': total_loss,
         'nll_loss': nll_loss,
         'reg_loss': reg_loss,
@@ -296,6 +299,9 @@ def train_single_site(model_cls, dataset, sites, lr=1e-3,
                                epoch)
             writer.add_scalars('accuracy',
                                {'{}_accuracy'.format(phase): res['accuracy']},
+                               epoch)
+            writer.add_scalars('AUC',
+                               {'{}_auc'.format(phase): res['auc']},
                                epoch)
             if res['reg_loss'] is not None:
                 writer.add_scalars('reg_loss'.format(phase),
@@ -619,7 +625,7 @@ if __name__ == "__main__":
     dataset = ABIDE(root='datasets/ALL')
     sites = ['NYU', 'USM', 'UM_1', 'UCLA_1']
     dataset = dataset.filter_by_site(sites)
-    model = Net
+    model = MLP
     # train_cross_validation(model, dataset, comment='test', batch_size=8, patience=200,
     #                        num_epochs=200, dropout=0.5, lr=3e-4, weight_decay=0.01, n_splits=5,
     #                        use_gpu=True, dp=False, ddp=False, fold_no=1,
