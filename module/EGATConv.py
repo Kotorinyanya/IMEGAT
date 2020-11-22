@@ -52,7 +52,7 @@ class Attention(nn.Module):
         # alpha *= 10  # de-flatten
         # alpha = softmax(alpha, row)
         # edge_attr = torch.exp(edge_attr / 2 - 1)
-        alpha = alpha * edge_attr.reshape(-1, 1)
+        alpha = alpha * edge_attr.abs().reshape(-1, 1)
 
         # Dropout attentions
         if self.att_dropout > 0:

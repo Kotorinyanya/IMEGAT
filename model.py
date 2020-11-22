@@ -39,9 +39,9 @@ class Net(nn.Module):
                       "el": 1}
 
         self.first_fc = nn.ModuleList([
-            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(self.in_nodes, 10), nn.BatchNorm1d(10)),
+            # nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
+            nn.Sequential(nn.Linear(self.in_nodes, 15), nn.BatchNorm1d(15)),
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
@@ -80,7 +80,7 @@ class Net(nn.Module):
             batch = Batch.from_data_list(batch)
 
         all_x = [
-            batch.x.to(self.device),
+            # batch.x.to(self.device),
             batch.adj_statistics.to(self.device),
             batch.raw_adj.to(self.device),
         ]
@@ -221,9 +221,9 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
 
         self.first_fc = nn.ModuleList([
-            nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(4, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(360, 10), nn.BatchNorm1d(10)),
+            # nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+            nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
+            nn.Sequential(nn.Linear(360, 15), nn.BatchNorm1d(15)),
             # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
         ])
 
@@ -239,9 +239,11 @@ class MLP(nn.Module):
         if type(batch) == list:  # Data list
             batch = Batch.from_data_list(batch)
 
-        all_x = [batch.x.to(self.device),
-                 batch.adj_statistics.to(self.device),
-                 batch.raw_adj.abs().to(self.device), ]
+        all_x = [
+            # batch.x.to(self.device),
+            batch.adj_statistics.to(self.device),
+            batch.raw_adj.abs().to(self.device),
+        ]
         # batch.time_series.to(self.device)]
         edge_index, edge_attr = batch.edge_index.to(self.device), batch.edge_attr
         edge_attr = edge_attr.to(self.device) if edge_attr is not None else edge_attr
