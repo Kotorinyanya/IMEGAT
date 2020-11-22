@@ -220,15 +220,15 @@ class MLP(nn.Module):
     def __init__(self, writer=None, dropout=0.0):
         super(MLP, self).__init__()
 
-        self.first_fc = nn.ModuleList([
-            # nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
-            nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
-            nn.Sequential(nn.Linear(360, 15), nn.BatchNorm1d(15)),
-            # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
-        ])
+        # self.first_fc = nn.ModuleList([
+        #     # nn.Sequential(nn.Linear(7, 10), nn.BatchNorm1d(10)),
+        #     nn.Sequential(nn.Linear(4, 15), nn.BatchNorm1d(15)),
+        #     nn.Sequential(nn.Linear(360, 15), nn.BatchNorm1d(15)),
+        #     # nn.Sequential(nn.Linear(200, 10), nn.BatchNorm1d(10))
+        # ])
 
         self.fc = nn.Sequential(
-            nn.Linear(30 * 360, 50),
+            nn.Linear(360 * 360, 50),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(50, 2),
@@ -241,7 +241,7 @@ class MLP(nn.Module):
 
         all_x = [
             # batch.x.to(self.device),
-            batch.adj_statistics.to(self.device),
+            # batch.adj_statistics.to(self.device),
             batch.raw_adj.abs().to(self.device),
         ]
         # batch.time_series.to(self.device)]
@@ -250,8 +250,8 @@ class MLP(nn.Module):
         num_graphs = batch.num_graphs
         num_nodes = int(batch.num_nodes / batch.num_graphs)
 
-        in_x = torch.cat([op(x) for op, x in zip(self.first_fc, all_x)], dim=-1)
-        # in_x = torch.cat(all_x, dim=-1)
+        # in_x = torch.cat([op(x) for op, x in zip(self.first_fc, all_x)], dim=-1)
+        in_x = torch.cat(all_x, dim=-1)
         in_x = in_x.reshape(num_graphs, -1)
 
         out = self.fc(in_x)
